@@ -14,13 +14,15 @@ start_counter = time.perf_counter()
 
 ### REAL SSID Format::
 #ssid = """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"aa11b2345c67d89e0f1g23456h78i9jk\\";s:10:\\"ip_address\\";s:11:\\"11.11.11.11\\";s:10:\\"user_agent\\";s:111:\\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36\\";s:13:\\"last_activity\\";i:1234567890;}1234a5b678901cd2efghi34j5678kl90","isDemo":0,"uid":12345678,"platform":2}]"""
+#ssid = """42["auth",{"session":"a:4:{s:10:\"session_id\";s:32:\"9b4dcc08de7b80bea558465493b51d00\";s:10:\"ip_address\";s:13:\"105.113.81.31\";s:10:\"user_agent\";s:84:\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0\";s:13:\"last_activity\";i:1749932489;}d8061221af16bc4365cadb486106c099","isDemo":0,"uid":34048913,"platform":1,"isFastHistory":true}]"""
+
 #demo = False
 
 ### DEMO SSID Format::
 #ssid = """42["auth",{"session":"abcdefghijklm12nopqrstuvwx","isDemo":1,"uid":12345678,"platform":2}]"""
 #demo = True
 
-ssid = """42["auth",{"session":"abcdefghijklm12nopqrstuvwx","isDemo":1,"uid":12345678,"platform":2}]"""
+ssid = """42["auth",{"session":"1620e72bltrkeb5e290f3etbcb","isDemo":1,"uid":34048913,"platform":1,"isFastHistory":true}]"""
 demo = True
 
 days = 365
