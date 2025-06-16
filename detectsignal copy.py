@@ -1,6 +1,5 @@
 # detectsignal.py
 import asyncio
-import os # Import the os module
 import time # Import the time module
 import re
 import threading
@@ -13,39 +12,29 @@ _buy_function = None
 _prepare_history_function = None
 _logger_function = None # Shortcut for _global_value_module.logger
 
-# --- Configuration for multiple Telegram accounts ---
-TELEGRAM_ACCOUNTS_CONFIG = [
-    {
-        'API_ID': '23324590',
-        'API_HASH': 'fdcd53d426aebd07096ff326bb124397',
-        'PHONE_NUMBER': '+2348101572723',
-        'SESSION_NAME': 'my_signal_listener', # Ensure unique session names
-        # 'TARGET_GROUP_IDENTIFIER': -1002153677822, # Group for Account 1
-        'TARGET_GROUP_IDENTIFIER' : -1002546061495,  #Test Channel
-        'ENABLED': True # Allows you to easily enable/disable this account
-    },
-    {
-        'API_ID': '20304811', # Replace with actual API_ID for Account 2
-        'API_HASH': 'abeb329421c4ba8b2958ca3d3e645068', # Replace with actual API_HASH for Account 2
-        'PHONE_NUMBER': '+2348085341275', # Replace with actual Phone Number for Account 2
-        'SESSION_NAME': 'ton_signal_listener', # Ensure unique session names
-        'TARGET_GROUP_IDENTIFIER': -1002360516634, # Example: Group for Account 2
-        # 'TARGET_GROUP_IDENTIFIER' : -1002546061495,  #Test Channel
-        'ENABLED': True # Allows you to easily enable/disable this account
-    }
-    # Add more account configurations as dictionaries in this list if needed
-]
 
+API_ID ='23324590'
+API_HASH ='fdcd53d426aebd07096ff326bb124397'
+# TARGET_GROUP_IDENTIFIER = -1002546061495  #Test Channel
+TARGET_GROUP_IDENTIFIER = -1002153677822
+PHONE_NUMBER = '+2348101572723'
+SESSION_NAME = 'my_signal_listener'
 DEFAULT_TRADE_AMOUNT = 1
+
+# API_ID ='20304811'
+# API_HASH ='abeb329421c4ba8b2958ca3d3e645068'
+# TARGET_GROUP_IDENTIFIER = -1002360516634
+# PHONE_NUMBER = '+2348085341275'
+# SESSION_NAME = 'ton_signal_listener'
+# DEFAULT_TRADE_AMOUNT = 1000
+
 DEFAULT_EXPIRATION_SECONDS = 10
 
 # For two-part signals
 _pending_first_part_signals = {} # Key: chat_id, Value: {'pair': str, 'timeframe_minutes': int, 'timestamp': float}
 PARTIAL_SIGNAL_TIMEOUT_SECONDS = 1000 # Timeout for waiting for the second part of a signal
 
-# This will be a list of booleans, one for each configured and enabled client
-_telethon_listeners_started_successfully = []
-
+_telethon_listener_started_successfully = False
 
 def _log(message, level="INFO"):
     if _logger_function:
@@ -94,8 +83,7 @@ def _parse_first_part_signal(message_text):
 
 def _parse_second_part_signal(message_text):
     """
-    Parses the second part of a two-part signal, e.g., "🔼UP🔼",\
-        \⬆️ UP ⬆️", "🔽DOWN🔽", or "⬇️ DOWN ⬇️".
+    Parses the second part of a two-part signal, e.g., "🔼UP🔼", "⬆️ UP ⬆️", "🔽DOWN🔽", or "⬇️ DOWN ⬇️".
     Returns 'call', 'put', or None.
     """
     txt = message_text.strip()
@@ -266,53 +254,36 @@ def parse_signal_from_message(message_text):
 
 #     _log(f"Trade order for {pair}: {action.upper()} ${amount} for {expiration_duration}s initiated via Telethon signal.", "INFO")
 
-def _place_trade_from_signal(pair, action, amount, expiration_duration, target_po_worker_name_unused=None): # target_po_worker_name_unused to keep signature if needed elsewhere, but will be ignored
+def _place_trade_from_signal(pair, action, amount, expiration_duration):
     """
     Internal helper to place a trade.
-    Now attempts to place the trade on ALL enabled PocketOption workers.
     """
     # ... (initial checks for module initialization and websocket connection) ...
 
     if not _global_value_module.pairs:
         _log("Pair list (global_value.pairs) is empty. Attempting to fetch.", "WARNING")
-        # Fetch pairs using a default worker (first enabled) for the main process's list.
-        # This list is for preliminary checks; actual tradeability is per worker.
-        # The _prepare_history_function is `prepare_history_via_worker_manager` from bot.py
-        # Passing None will make it use its default logic (e.g., first enabled worker).
-        if not _prepare_history_function(target_po_account_name=None):
+        if not _prepare_history_function():
             _log("Could not fetch/verify pair list from PocketOption. Trade aborted.", "ERROR")
             return
         _log(f"Pair list refreshed. {len(_global_value_module.pairs)} pairs loaded.", "INFO")
-        
+
     # Check if the exact pair from the signal is in our list of (presumably active) pairs
     if pair not in _global_value_module.pairs:
         warning_msg = (f"Warning: Pair '{pair}' not found in the pre-loaded list of tradable assets "
-                       f"(main process's global_value.pairs). This list might not reflect individual worker states. "
+                       f"(which is populated based on active status and payout criteria). "
                        f"This could mean '{pair}' is currently inactive or doesn't meet payout criteria. "
                        f"Attempting trade with '{pair}' as specified in the signal.")
         _log(warning_msg, "WARNING") # Log the warning
-        # In a multi-worker setup, the main process's `global_value.pairs` might not be the
-        # single source of truth. The worker itself will ultimately decide if it can trade the pair.
-        # So, we might allow the trade attempt to proceed to the worker.
-        # However, if `prepare_history_func` (now `prepare_history_via_worker_manager`)
-        # populates a main process list of known active pairs per worker, that could be checked here.
-        # For now, we'll let the worker handle the final pair validation.
-        # If you want to pre-filter:
-        # _log(f"Trade for '{pair}' will NOT be placed as it's not in the main process's active/valid list.", "INFO")
-        # return
-        _log(f"Pair '{pair}' not in main process's global_value.pairs. Worker will perform final validation.", "DEBUG")
-
+        _log(f"Trade for '{pair}' will NOT be placed as it's not in the active/valid list.", "INFO")
+        return # Explicitly stop further processing for this signal
     else:
         _log(f"Pair '{pair}' from signal found in the pre-loaded list of tradable assets.", "INFO")
 
     _log(f"Attempting trade from signal: Amount: {amount}, Pair: {pair}, Action: {action}, Expiration: {expiration_duration}s", "INFO") # Using original 'pair'
 
-    # _buy_function is `place_trade_via_worker_manager` from bot.py
-    # It expects (amount, pair, action, expiration_duration, target_po_account_name=None)
-    # We pass 'ALL_ENABLED_WORKERS' to target all.
-    trade_thread = threading.Thread(target=_buy_function, args=(amount, pair, action, expiration_duration, 'ALL_ENABLED_WORKERS'))
+    trade_thread = threading.Thread(target=_buy_function, args=(amount, pair, action, expiration_duration))
     trade_thread.start()
-    
+
     _log(f"Trade order for {pair}: {action.upper()} ${amount} for {expiration_duration}s initiated via Telethon signal.", "INFO")
 
 # Telethon event handler for new messages
@@ -322,23 +293,8 @@ async def new_message_handler(event):
     sender_id = sender.id if sender else "UnknownSender"
     chat = await event.get_chat()
     chat_title = chat.title if hasattr(chat, 'title') else (chat.username if hasattr(chat, 'username') else str(chat.id))
-    current_time = time.time()
 
-    # Identify which Telethon account received this message for logging/routing
-    # This assumes `client.session.filename` gives the session name from TELEGRAM_ACCOUNTS_CONFIG
-    # This is a bit of a hack; a cleaner way would be to pass the account_config into the handler if possible,
-    # or store a mapping from client instance to account_config. The session filename includes the path.
-    raw_session_filename = event.client.session.filename 
-    # Extract just the session name part (e.g., "my_signal_listener" from "telegram_sessions/my_signal_listener.session")
-    telethon_session_name_only = os.path.basename(raw_session_filename).replace(".session", "")
-
-    # The PO_WORKER_NAME from TELEGRAM_ACCOUNTS_CONFIG is no longer used for direct routing here,
-    # as trades are sent to all enabled PO workers.
-    # current_telethon_config = next((acc for acc in TELEGRAM_ACCOUNTS_CONFIG if acc['SESSION_NAME'] == telethon_session_name_only), None)
-    
-    log_prefix_for_handler = f"[SignalDetector-{telethon_session_name_only}]"
-
-    _log(f"{log_prefix_for_handler} Msg from group '{chat_title}' (ID: {event.chat_id}, SenderID: {sender_id}): \"{message_text}\"", "DEBUG")
+    _log(f"Msg from group '{chat_title}' (ID: {event.chat_id}, SenderID: {sender_id}): \"{message_text}\"", "DEBUG")
 
     # 1. Check if this message is the SECOND PART of a pending two-part signal
     if event.chat_id in _pending_first_part_signals:
@@ -346,12 +302,12 @@ async def new_message_handler(event):
         
         # Check for timeout of the pending first part
         if time.time() - pending_signal_info['timestamp'] > PARTIAL_SIGNAL_TIMEOUT_SECONDS:
-            _log(f"{log_prefix_for_handler} Pending signal for chat {event.chat_id} ({pending_signal_info['pair']}) timed out. Clearing.", "INFO")
+            _log(f"Pending signal for chat {event.chat_id} ({pending_signal_info['pair']}) timed out. Clearing.", "INFO")
             del _pending_first_part_signals[event.chat_id]
         else:
             action = _parse_second_part_signal(message_text)
             if action:
-                _log(f"{log_prefix_for_handler} Second part '{action.upper()}' received for pending signal: {pending_signal_info['pair']} M{pending_signal_info['timeframe_minutes']}", "INFO")
+                _log(f"Second part '{action.upper()}' received for pending signal: {pending_signal_info['pair']} M{pending_signal_info['timeframe_minutes']}", "INFO")
                 
                 expiration_seconds = pending_signal_info['timeframe_minutes'] * 60
                 
@@ -366,8 +322,7 @@ async def new_message_handler(event):
                     pair=signal_data_for_trade['pair'],
                     action=signal_data_for_trade['action'],
                     amount=signal_data_for_trade['amount'],
-                    expiration_duration=signal_data_for_trade['expiration'],
-                    # target_po_worker_name is no longer passed here for individual routing
+                    expiration_duration=signal_data_for_trade['expiration']
                 )
                 del _pending_first_part_signals[event.chat_id] # Clear the pending signal
                 return # Signal processed
@@ -376,119 +331,106 @@ async def new_message_handler(event):
     first_part_data = _parse_first_part_signal(message_text)
     if first_part_data:
         if event.chat_id in _pending_first_part_signals:
-            _log(f"{log_prefix_for_handler} Overwriting previous pending signal for chat {event.chat_id} with new first part: {first_part_data['pair']} M{first_part_data['timeframe_minutes']}", "WARNING")
+            _log(f"Overwriting previous pending signal for chat {event.chat_id} with new first part: {first_part_data['pair']} M{first_part_data['timeframe_minutes']}", "WARNING")
 
         _pending_first_part_signals[event.chat_id] = {
             'pair': first_part_data['pair'],
             'timeframe_minutes': first_part_data['timeframe_minutes'],
             'timestamp': time.time()
         }
-        _log(f"{log_prefix_for_handler} First part detected: Pair={first_part_data['pair']}, M{first_part_data['timeframe_minutes']}. Waiting for direction in chat {event.chat_id}.", "INFO")
+        _log(f"First part of two-part signal detected: Pair={first_part_data['pair']}, Timeframe=M{first_part_data['timeframe_minutes']}. Waiting for direction in chat {event.chat_id}.", "INFO")
         return # First part stored, wait for second
 
     # 3. If not a two-part signal (neither first nor second part), try the original single-message parser
     # This is for existing signal formats like TWSBINARY or the fallback pattern.
     original_format_signal_data = parse_signal_from_message(message_text)
     if original_format_signal_data:
-        _log(f"{log_prefix_for_handler} Actionable signal (original single-message format) detected: {original_format_signal_data}", "INFO")
+        _log(f"Actionable signal (original single-message format) detected: {original_format_signal_data}", "INFO")
         _place_trade_from_signal(
             pair=original_format_signal_data['pair'],
             action=original_format_signal_data['action'],
             amount=original_format_signal_data['amount'],
-            expiration_duration=original_format_signal_data['expiration'],
-            # target_po_worker_name is no longer passed here
+            expiration_duration=original_format_signal_data['expiration']
         )
         return
 
-async def _run_telethon_listener_loop(account_config, success_flags_list, listener_index):
-    """
-    Internal async function to run the Telethon client for a single account.
-    Updates the success_flags_list for its specific index.
-    """
-    session_name = account_config['SESSION_NAME']
-    api_id = account_config['API_ID']
-    api_hash = account_config['API_HASH']
-    phone_number = account_config['PHONE_NUMBER']
-    target_group = account_config['TARGET_GROUP_IDENTIFIER']
+async def _run_telethon_listener_loop():
+    """Internal async function to run the Telethon client."""
+    global _telethon_listener_started_successfully
 
-    log_prefix = f"[SignalDetector-{session_name}]"
+    if not API_ID or API_ID == 1234567 or not API_HASH or API_HASH == 'YOUR_API_HASH' or not PHONE_NUMBER or PHONE_NUMBER == '+12345678900':
+        _log("Telethon API_ID, API_HASH, or PHONE_NUMBER not configured correctly. Please update them in detectsignal.py.", "CRITICAL")
+        _log("Telethon listener will not start.", "CRITICAL")
+        return False # Indicate failure
+    
+    if not TARGET_GROUP_IDENTIFIER or TARGET_GROUP_IDENTIFIER == -1001234567890 and isinstance(TARGET_GROUP_IDENTIFIER, int):
+         _log(f"TARGET_GROUP_IDENTIFIER is set to a placeholder value: {TARGET_GROUP_IDENTIFIER}. Please configure it.", "CRITICAL")
+         _log("Telethon listener will not start.", "CRITICAL")
+         return False # Indicate failure
 
-    # Ensure success_flags_list is initialized for this listener
-    if listener_index >= len(success_flags_list):
-        _log(f"{log_prefix} Internal error: listener_index out of bounds for success_flags_list.", "CRITICAL")
-        return # Should not happen if called correctly
-
-    success_flags_list[listener_index] = False # Default to False
-
-    if not api_id or str(api_id) == '1234567' or not api_hash or api_hash == 'YOUR_API_HASH' or not phone_number or phone_number == '+12345678900':
-        _log(f"{log_prefix} API_ID, API_HASH, or PHONE_NUMBER not configured correctly. Listener will not start.", "CRITICAL")
-        return
-
-    if not target_group or (isinstance(target_group, int) and target_group == -1001234567890): # Example placeholder check
-        _log(f"{log_prefix} TARGET_GROUP_IDENTIFIER ({target_group}) is invalid or a placeholder. Listener will not start.", "CRITICAL")
-        return
-
-    # Construct session path
-    session_folder = "telegram_sessions"
-    if not os.path.exists(session_folder):
-        os.makedirs(session_folder)
-        _log(f"{log_prefix} Created directory: {session_folder}", "INFO")
-    full_session_path = os.path.join(session_folder, session_name)
-
-    client = TelegramClient(full_session_path, api_id, api_hash)
+    # system_version is sometimes needed for Telethon to work smoothly with Telegram's API layers.
+    # You can usually leave it or use a recent version string if you encounter issues.
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
     try:
-        _log(f"{log_prefix} Connecting Telethon client...", "INFO")
+        _log("Connecting Telethon client...", "INFO")
         await client.connect()
 
         if not await client.is_user_authorized():
-            _log(f"{log_prefix} User not authorized. Sending code request to {phone_number}...", "INFO")
-            await client.send_code_request(phone_number)
-            _log(f"{log_prefix} Telethon is waiting for you to enter the code sent to {phone_number}. Please check your Telegram messages.", "IMPORTANT")
+            _log("User not authorized. Sending code request to phone number...", "INFO")
+            await client.send_code_request(PHONE_NUMBER)
+            # Inform the main thread or user that code input is needed.
+            _log(f"Telethon is waiting for you to enter the code sent to {PHONE_NUMBER}. Please check your Telegram messages.", "IMPORTANT") # Custom level or use INFO
             while True:
                 try:
-                    code = input(f"Telethon ({session_name}): Enter the code for {phone_number}: ")
-                    await client.sign_in(phone_number, code)
-                    break
-                except EOFError:
-                    _log(f"{log_prefix} Could not read code from input (EOFError). Ensure interactive session for first login.", "ERROR")
+                    code = input(f"Telethon: Enter the code you received for {PHONE_NUMBER}: ")
+                    await client.sign_in(PHONE_NUMBER, code)
+                    break # Exit loop on successful sign-in
+                except EOFError: # Happens if input() is called in a non-interactive environment
+                    _log("Telethon: Could not read code from input (EOFError). Ensure you are running this interactively for the first login.", "ERROR")
                     await client.disconnect()
-                    return
-                except Exception as e:
-                    _log(f"{log_prefix} Sign-in error: {e}. If 2FA, provide password. Try code again.", "ERROR")
-                    if 'password' in str(e).lower(): # Basic check for 2FA password needed
-                         try:
-                            password = input(f"Telethon ({session_name}): 2FA Password for {phone_number}: ")
-                            await client.sign_in(password=password)
-                            break
-                         except Exception as p_err:
-                            _log(f"{log_prefix} 2FA password error: {p_err}", "ERROR")
-                            # Decide if to return or continue loop for code entry
+                    return False # Indicate failure
+                except Exception as e: # Catch specific errors like SessionPasswordNeededError if 2FA is on
+                    _log(f"Telethon sign-in error: {e}. If you have 2FA, you might need to provide password.", "ERROR")
+                    # Example for 2FA:
+                    # if 'password' in str(e).lower(): # Crude check for password needed
+                    #     try:
+                    #         password = input("Telethon: 2FA Password needed: ")
+                    #         await client.sign_in(password=password)
+                    #         break
+                    #     except Exception as p_err:
+                    #         _log(f"Telethon 2FA password error: {p_err}", "ERROR")
+                    #         await client.disconnect()
+                    #         return False # Indicate failure
+                    _log("Try entering code again or check 2FA.", "INFO")
+                    # If sign-in fails repeatedly, you might want to break or exit.
 
         if await client.is_user_authorized():
-            _log(f"{log_prefix} Client connected and authorized successfully.", "INFO")
-            client.add_event_handler(new_message_handler, events.NewMessage(chats=[target_group]))
-            _log(f"{log_prefix} Event handler added for target: {target_group}", "INFO")
-            _log(f"{log_prefix} Listener started. Monitoring for new messages...")
-            success_flags_list[listener_index] = True # Mark as successfully started
-            await client.run_until_disconnected()
+            _log("Telethon client connected and authorized successfully.", "INFO")
+            
+            # Add event handler for new messages in the target chat
+            client.add_event_handler(new_message_handler, events.NewMessage(chats=[TARGET_GROUP_IDENTIFIER]))
+            _log(f"Telethon event handler added for target: {TARGET_GROUP_IDENTIFIER}", "INFO")
+            _log("Telethon listener started. Monitoring for new messages...")
+            _telethon_listener_started_successfully = True # Set flag on successful start
+            await client.run_until_disconnected() # Runs indefinitely until client disconnects or an error
         else:
-            _log(f"{log_prefix} Authorization failed. Listener will not start.", "ERROR")
-            # success_flags_list[listener_index] remains False
+            _log("Telethon authorization failed. Listener will not start.", "ERROR")
+            return False # Indicate failure
 
-    except ConnectionRefusedError:
-        _log(f"{log_prefix} Connection refused. Check network or Telegram status/firewall.", "CRITICAL")
-        # success_flags_list[listener_index] remains False
+    except ConnectionError as e:
+        _log(f"Telethon connection error: {e}. Check network or Telegram status.", "CRITICAL")
+        return False # Indicate failure
     except Exception as e:
-        _log(f"{log_prefix} An unexpected error occurred: {e}", "CRITICAL")
-        # success_flags_list[listener_index] remains False
+        _log(f"An unexpected error occurred in Telethon listener: {e}", "CRITICAL")
+        return False # Indicate failure
     finally:
         if client.is_connected():
-            _log(f"{log_prefix} Disconnecting Telethon client...", "INFO")
+            _log("Disconnecting Telethon client...", "INFO")
             await client.disconnect()
-        _log(f"{log_prefix} Client session ended.", "INFO")
-        # If an error occurred before success_flags_list[listener_index] was set to True,
-        # it will remain False, correctly indicating failure for this listener.
+        _log("Telethon client session ended.", "INFO")
+    return _telethon_listener_started_successfully # Return the status
+
 
 def start_signal_detector(api_instance, global_value_mod, buy_func, prep_history_func):
     """
@@ -496,8 +438,6 @@ def start_signal_detector(api_instance, global_value_mod, buy_func, prep_history
     Returns True if the initial setup checks pass and thread starts, False otherwise.
     """
     global _api_object, _global_value_module, _buy_function, _prepare_history_function, _logger_function
-    global _telethon_listeners_started_successfully # This is now a list
-
     _api_object = api_instance
     _global_value_module = global_value_mod
     _buy_function = buy_func
@@ -506,77 +446,54 @@ def start_signal_detector(api_instance, global_value_mod, buy_func, prep_history
     if hasattr(_global_value_module, 'logger'):
         _logger_function = _global_value_module.logger
     else:
-        print("[CRITICAL][detectsignal] global_value.logger not found. Logging will be basic.")
+        print("[CRITICAL][detectsignal] global_value.logger not found. Telegram logging will be basic")
 
-    # In multi-worker setup, _api_object is None. Check for essential functions and modules.
-    if not all([_global_value_module, _buy_function, _prepare_history_function]):
-        _log("Essential components (_global_value_module, _buy_function, _prepare_history_function) "
-             "not provided to Telethon signal detector. Cannot start.", "CRITICAL")
+    if not all([_api_object, _global_value_module, _buy_function, _prepare_history_function]):
+        _log("One or more essential components not provided to Telethon signal detector. Cannot start.", "CRITICAL")
         return False
 
-    _log("Initializing Telethon signal detector for multiple accounts...", "INFO")
+    #_log("Start Check", "CRITICAL")
+    _log("Initializing Telethon signal detector...", "INFO")
 
-    enabled_accounts = [acc for acc in TELEGRAM_ACCOUNTS_CONFIG if acc.get('ENABLED', True)]
-    if not enabled_accounts:
-        _log("No Telegram accounts are enabled in TELEGRAM_ACCOUNTS_CONFIG. Signal detector will not start.", "WARNING")
-        return False
+    # Reset flag before starting
+    global _telethon_listener_started_successfully
+    _telethon_listener_started_successfully = False
 
-    _telethon_listeners_started_successfully = [False] * len(enabled_accounts)
-    threads = []
+    # Telethon uses asyncio. We run its event loop in a dedicated thread
+    # because the main bot.py might not be asyncio-based.
+    def telethon_thread_runner():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        # The _run_telethon_listener_loop now handles its own try/except/finally for client.disconnect
+        # and returns a status. The thread_runner's main job is to run this loop.
+        loop.run_until_complete(_run_telethon_listener_loop())
+        # Loop closure is handled if _run_telethon_listener_loop exits or errors out.
+        # For graceful shutdown on KeyboardInterrupt, _run_telethon_listener_loop would need to catch it.
 
-    for idx, account_conf in enumerate(enabled_accounts):
-        # Closure to pass specific args to the thread target
-        def telethon_thread_runner_for_account(config, flags_list, index):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(_run_telethon_listener_loop(config, flags_list, index))
-            finally:
-                loop.close()
 
-        thread_name = f"TelethonSignalDetectorThread-{account_conf['SESSION_NAME']}"
-        listener_thread = threading.Thread(
-            target=telethon_thread_runner_for_account,
-            args=(account_conf, _telethon_listeners_started_successfully, idx),
-            name=thread_name
-        )
-        listener_thread.daemon = True # Exits when main program exits
-        threads.append(listener_thread)
-        listener_thread.start()
-        _log(f"Telethon signal detector thread started for {account_conf['SESSION_NAME']}.", "INFO")
-
-    # Wait for all threads to attempt startup and set their success flags.
-    # This timeout should be generous enough for manual code entry if needed for multiple accounts.
-    timeout_for_startup_flags = 120 * len(enabled_accounts) # e.g., 2 minutes per account
-    all_listeners_reported_status = False
-    processed_listeners_count = 0 # To track how many listeners have finished their startup attempt
+    telethon_listener_thread = threading.Thread(target=telethon_thread_runner, name="TelethonSignalDetectorThread")
+    # Set daemon to True so this thread exits when the main program exits.
+    # If you need more graceful shutdown (e.g., Telethon sending a "goodbye"),
+    # you'd set daemon=False and manage its lifecycle more explicitly (e.g., with an event).
+    telethon_listener_thread.daemon = True
+    telethon_listener_thread.start()
+    _log("Telethon signal detector thread started.", "INFO")
+    
+    # Wait for a short period to see if the Telethon thread sets the success flag
+    # This indicates that initial config checks passed and client.run_until_disconnected() was reached.
+    # This doesn't guarantee long-term connection, but that initial setup was okay.
+    # A more complex solution would use threading.Event for explicit signaling.    
+    # Increase timeout to allow for manual code entry if needed.
+    timeout_for_startup_flag = 120  # seconds (2 minutes) - Adjust as needed
 
     start_wait_time = time.time()
-    # We need to wait until all threads have had a chance to set their flag or die.
-    # A simple check is to see if all threads are still alive OR their flag is set.
-    # This loop waits for all threads to either set their flag or terminate.
-    while (time.time() - start_wait_time) < timeout_for_startup_flags:
-        # Count how many threads have either set their success flag or are no longer alive (meaning they finished their attempt)
-        finished_attempts = 0
-        for i, t in enumerate(threads):
-            if _telethon_listeners_started_successfully[i] or not t.is_alive():
-                finished_attempts +=1
-        
-        if finished_attempts == len(enabled_accounts):
-            all_listeners_reported_status = True
-            break
+    while not _telethon_listener_started_successfully and (time.time() - start_wait_time) < timeout_for_startup_flag:
+        if not telethon_listener_thread.is_alive():
+            _log("Telethon listener thread terminated prematurely during startup check.", "ERROR")
+            return False # Thread died, so it definitely didn't start successfully
         time.sleep(0.5)
 
-    if not all_listeners_reported_status:
-        _log("Timeout waiting for all Telethon listeners to report startup status.", "WARNING")
-
-    final_success_status = all(_telethon_listeners_started_successfully)
-    if final_success_status:
-        _log("All enabled Telethon listeners started successfully.", "INFO")
-    else:
-        _log("One or more Telethon listeners failed to start. Check logs for details.", "ERROR")
-        for idx, acc_conf in enumerate(enabled_accounts):
-            if not _telethon_listeners_started_successfully[idx]:
-                _log(f"Listener for {acc_conf['SESSION_NAME']} reported failure or did not start.", "ERROR")
-
-    return final_success_status
+    if not _telethon_listener_started_successfully:
+        _log("Telethon listener did not confirm successful startup within timeout or config check failed.", "WARNING")
+        # The thread itself would have logged the CRITICAL config error if that was the cause.
+    return _telethon_listener_started_successfully
