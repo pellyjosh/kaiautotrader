@@ -13,21 +13,26 @@ _prepare_history_function = None
 _logger_function = None # Shortcut for _global_value_module.logger
 
 
-# API_ID ='23324590'
-# API_HASH ='fdcd53d426aebd07096ff326bb124397'
-# TARGET_GROUP_IDENTIFIER = -1002546061495 
-# PHONE_NUMBER = '+2348101572723'
-# SESSION_NAME = 'my_signal_listener'
+API_ID ='23324590'
+API_HASH ='fdcd53d426aebd07096ff326bb124397'
+# TARGET_GROUP_IDENTIFIER = -1002546061495  #Test Channel
+TARGET_GROUP_IDENTIFIER = -1002153677822
+PHONE_NUMBER = '+2348101572723'
+SESSION_NAME = 'my_signal_listener'
+DEFAULT_TRADE_AMOUNT = 1
+
+# API_ID ='20304811'
+# API_HASH ='abeb329421c4ba8b2958ca3d3e645068'
+# TARGET_GROUP_IDENTIFIER = -1002360516634
+# PHONE_NUMBER = '+2348085341275'
+# SESSION_NAME = 'ton_signal_listener'
 # DEFAULT_TRADE_AMOUNT = 1000
 
-API_ID ='20304811'
-API_HASH ='abeb329421c4ba8b2958ca3d3e645068'
-TARGET_GROUP_IDENTIFIER = -1002360516634
-PHONE_NUMBER = '+2348085341275'
-SESSION_NAME = 'ton_signal_listener'
-DEFAULT_TRADE_AMOUNT = 1000
+DEFAULT_EXPIRATION_SECONDS = 180
 
-DEFAULT_EXPIRATION_SECONDS = 60
+# For two-part signals
+_pending_first_part_signals = {} # Key: chat_id, Value: {'pair': str, 'timeframe_minutes': int, 'timestamp': float}
+PARTIAL_SIGNAL_TIMEOUT_SECONDS = 60 # Timeout for waiting for the second part of a signal
 
 _telethon_listener_started_successfully = False
 
@@ -36,6 +41,57 @@ def _log(message, level="INFO"):
         _logger_function(f"[SignalDetector] {message}", level)
     else:
         print(f"[{level}][SignalDetector] {message}")
+
+def _normalize_pair_for_new_format(raw_pair_text):
+    """
+    Normalizes pair string from formats like "BHD/CNY OTC", "EURUSD", "AUD/CAD_otc".
+    Output: "BHDCNY_otc", "EURUSD", "AUDCAD_otc" (slash removed, _otc is lowercase, base is uppercase)
+    """
+    normalized_pair = raw_pair_text.strip() # Keep original case for a moment for OTC checks
+
+    # Standardize OTC suffix to _otc and ensure base is uppercase and slashes removed
+    if normalized_pair.upper().endswith(" OTC"): # Handles "BHD/CNY OTC"
+        base = normalized_pair[:-4].strip()
+        normalized_pair = base.upper().replace("/", "") + "_otc"
+    elif "_otc" in normalized_pair.lower(): # Handles "AUD/CAD_otc" or "EURUSD_otc" or "EURUSD_OTC"
+        # Split by _otc (case-insensitive), take the first part, uppercase, remove slashes, add _otc
+        parts = re.split(r'_otc', normalized_pair, flags=re.IGNORECASE)
+        normalized_pair = parts[0].upper().replace("/", "") + "_otc"
+    else: # Handles "EURUSD" or "USD/JPY"
+        normalized_pair = normalized_pair.upper().replace("/", "")
+        
+    # Ensure any remaining _OTC (if somehow missed) becomes _otc - defensive
+    normalized_pair = normalized_pair.replace("_OTC", "_otc")
+    return normalized_pair
+
+def _parse_first_part_signal(message_text):
+    """
+    Parses the first part of a two-part signal, e.g., "BHD/CNY OTC M1".
+    Returns {'pair': 'BHD/CNY_otc', 'timeframe_minutes': 1} or None.
+    """
+    # Expects message like "BHD/CNY OTC M1" or "EURUSD M5"
+    # Regex matches the pair part (including optional OTC) and the M<digits> timeframe
+    match = re.fullmatch(r"([\w\/]+(?:\s+OTC)?)\s+M(\d+)", message_text.strip(), re.IGNORECASE)
+    if match:
+        raw_pair_text = match.group(1)
+        timeframe_minutes = int(match.group(2))
+        
+        normalized_pair = _normalize_pair_for_new_format(raw_pair_text)
+
+        return {'pair': normalized_pair, 'timeframe_minutes': timeframe_minutes}
+    return None
+
+def _parse_second_part_signal(message_text):
+    """
+    Parses the second part of a two-part signal, e.g., "🔼UP🔼" or "🔽DOWN🔽".
+    Returns 'call', 'put', or None.
+    """
+    txt = message_text.strip()
+    if re.fullmatch(r"🔼\s*UP\s*🔼", txt, re.IGNORECASE):
+        return 'call'
+    if re.fullmatch(r"🔽\s*DOWN\s*🔽", txt, re.IGNORECASE):
+        return 'put'
+    return None
 
 def parse_signal_from_message(message_text):
     """
@@ -70,39 +126,39 @@ def parse_signal_from_message(message_text):
 
     if match:
         action_str = match.group(1).upper()
-        # Handle pair string casing carefully, especially for '_otc'
-        raw_pair_str = match.group(2) # Get the raw pair string
-        if raw_pair_str.lower().endswith("_otc"):
-            base_pair = raw_pair_str[:-4] # Get the part before _otc
-            pair_str = base_pair.upper() + "_otc" # Uppercase base, keep _otc lowercase
-        else:
-            pair_str = raw_pair_str.upper() # Uppercase fully if not an OTC pair
+        raw_pair_str_from_signal = match.group(2).strip() # e.g., "USDCADm", "EUR/USD_otc"
+        
+        # 1. Handle potential trailing 'm' (specific to TWSBINARY source)
+        temp_pair = raw_pair_str_from_signal
+        if temp_pair.upper().endswith('M') and len(temp_pair) > 1 and temp_pair[-2].isalpha():
+            if not temp_pair.upper().endswith("_OTCM"): # Avoid stripping M from a name like "XYZ_OTCM"
+                 temp_pair = temp_pair[:-1] # e.g., "USDCADm" -> "USDCAD"
+
+        # 2. Normalize the processed pair string (e.g., "USDCAD", "EUR/USD_otc")
+        #    This logic mirrors _normalize_pair_for_new_format for consistency.
+        normalized_intermediate_pair = temp_pair 
+        if normalized_intermediate_pair.upper().endswith(" OTC"): # Unlikely for TWSBINARY regex
+            base = normalized_intermediate_pair[:-4].strip()
+            pair_str = base.upper().replace("/", "") + "_otc"
+        elif "_otc" in normalized_intermediate_pair.lower(): # Handles "EUR/USD_otc"
+            parts = re.split(r'_otc', normalized_intermediate_pair, flags=re.IGNORECASE)
+            pair_str = parts[0].upper().replace("/", "") + "_otc" # e.g. "EURUSD_otc"
+        else: # Handles "USDCAD" or "EUR/USD" (if _otc was not part of it)
+            pair_str = normalized_intermediate_pair.upper().replace("/", "") # e.g. "USDCAD", "EURUSD"
+        
+        # Ensure any remaining _OTC becomes _otc - defensive
+        pair_str = pair_str.replace("_OTC", "_otc")
 
         exp_value = int(match.group(3))
         exp_unit = match.group(4).lower()
 
         action = 'put' if action_str == 'PUT' else 'call'
         
-        # Convert expiration to seconds
-        expiration_seconds = DEFAULT_EXPIRATION_SECONDS # Default
-        if 'minute' in exp_unit:
-            expiration_seconds = exp_value * 60
-        elif 'second' in exp_unit:
-            expiration_seconds = exp_value
-        elif 'hour' in exp_unit:
-            expiration_seconds = exp_value * 3600
-
-        amount = DEFAULT_TRADE_AMOUNT # Use default amount
-
-        # PocketOption API might have specific pair naming conventions.
-        # The "m" at the end of USDCADm might be specific to the signal provider
-        # or might need to be handled/removed for PocketOption.
-        # For now, we'll use it as is. If PocketOption expects "USDCAD", you'll need to adjust pair_str.
-        # If the pair (before _otc if present) ends with 'M', remove it.
-        if "_otc" in pair_str and pair_str[:-4].endswith('M'):
-            pair_str = pair_str[:-5] + "_otc" # Remove M before _otc
-        elif not "_otc" in pair_str and pair_str.endswith('M'):
-            pair_str = pair_str[:-1] # Remove M if no _otc
+        expiration_seconds = DEFAULT_EXPIRATION_SECONDS 
+        if 'minute' in exp_unit: expiration_seconds = exp_value * 60
+        elif 'second' in exp_unit: expiration_seconds = exp_value
+        elif 'hour' in exp_unit: expiration_seconds = exp_value * 3600
+        amount = DEFAULT_TRADE_AMOUNT
 
         _log(f"Signal parsed: Pair={pair_str}, Action={action}, Amount=${amount}, Expiration={expiration_seconds}s", "INFO")
         return {'pair': pair_str, 'action': action, 'amount': amount, 'expiration': expiration_seconds}
@@ -118,11 +174,23 @@ def parse_signal_from_message(message_text):
     )
     match_fallback = pattern1_fallback.search(message_text)
     if match_fallback:
-        pair = match_fallback.group(1).upper()
+        pair_raw_fallback = match_fallback.group(1).strip()
         action_str = match_fallback.group(2).upper()
         amount_str = match_fallback.group(3)
         exp_val_str = match_fallback.group(4)
         exp_unit = match_fallback.group(5)
+
+        # Normalize pair for fallback pattern
+        if pair_raw_fallback.startswith("#"): # Special case for symbols like #AAPL
+            pair = pair_raw_fallback.upper() 
+        elif pair_raw_fallback.upper().endswith(" OTC"): # Unlikely for this regex pattern
+            base_fallback = pair_raw_fallback[:-4].strip()
+            pair = base_fallback.upper().replace("/", "") + "_otc"
+        elif "_otc" in pair_raw_fallback.lower():
+            parts_fallback = re.split(r'_otc', pair_raw_fallback, flags=re.IGNORECASE)
+            pair = parts_fallback[0].upper().replace("/", "") + "_otc"
+        else: # Handles "BTC/USD", "EURUSD"
+            pair = pair_raw_fallback.upper().replace("/", "")
 
         action_fallback = 'call' if action_str in ['CALL', 'BUY'] else 'put'
         
@@ -137,6 +205,9 @@ def parse_signal_from_message(message_text):
                 expiration_fallback = exp_val * 60
             elif exp_unit.lower() == 'h':
                 expiration_fallback = exp_val * 3600
+        
+        # Ensure any remaining _OTC becomes _otc - defensive
+        pair = pair.replace("_OTC", "_otc")
         
         _log(f"Signal parsed: Pair={pair}, Action={action_fallback}, Amount=${amount_fallback}, Expiration={expiration_fallback}s", "INFO")
         return {'pair': pair, 'action': action_fallback, 'amount': amount_fallback, 'expiration': expiration_fallback}
@@ -217,26 +288,65 @@ async def new_message_handler(event):
     chat = await event.get_chat()
     chat_title = chat.title if hasattr(chat, 'title') else (chat.username if hasattr(chat, 'username') else str(chat.id))
 
-    _log(f"Msg from group '{chat_title}' (SenderID: {sender_id}): \"{message_text}\"", "DEBUG")
+    _log(f"Msg from group '{chat_title}' (ID: {event.chat_id}, SenderID: {sender_id}): \"{message_text}\"", "DEBUG")
 
-    # Optional: Filter messages by sender ID if signals always come from specific users
-    # known_signal_sender_ids = [12345678, 87654321] # Example sender IDs
-    # if sender_id not in known_signal_sender_ids:
-    #     _log(f"Message from {sender_id} is not a known signal sender. Ignoring.", "DEBUG")
-    #     return
+    # 1. Check if this message is the SECOND PART of a pending two-part signal
+    if event.chat_id in _pending_first_part_signals:
+        pending_signal_info = _pending_first_part_signals[event.chat_id]
+        
+        # Check for timeout of the pending first part
+        if time.time() - pending_signal_info['timestamp'] > PARTIAL_SIGNAL_TIMEOUT_SECONDS:
+            _log(f"Pending signal for chat {event.chat_id} ({pending_signal_info['pair']}) timed out. Clearing.", "INFO")
+            del _pending_first_part_signals[event.chat_id]
+        else:
+            action = _parse_second_part_signal(message_text)
+            if action:
+                _log(f"Second part '{action.upper()}' received for pending signal: {pending_signal_info['pair']} M{pending_signal_info['timeframe_minutes']}", "INFO")
+                
+                expiration_seconds = pending_signal_info['timeframe_minutes'] * 60
+                
+                signal_data_for_trade = {
+                    'pair': pending_signal_info['pair'],
+                    'action': action,
+                    'amount': DEFAULT_TRADE_AMOUNT, # Or customize if amount can be in first/second part
+                    'expiration': expiration_seconds
+                }
+                
+                _place_trade_from_signal(
+                    pair=signal_data_for_trade['pair'],
+                    action=signal_data_for_trade['action'],
+                    amount=signal_data_for_trade['amount'],
+                    expiration_duration=signal_data_for_trade['expiration']
+                )
+                del _pending_first_part_signals[event.chat_id] # Clear the pending signal
+                return # Signal processed
 
-    signal_data = parse_signal_from_message(message_text)
-    if signal_data:
-        _log(f"Actionable signal detected: {signal_data}", "INFO")
+    # 2. If not a second part, check if it's the FIRST PART of the new two-part signal
+    first_part_data = _parse_first_part_signal(message_text)
+    if first_part_data:
+        if event.chat_id in _pending_first_part_signals:
+            _log(f"Overwriting previous pending signal for chat {event.chat_id} with new first part: {first_part_data['pair']} M{first_part_data['timeframe_minutes']}", "WARNING")
+
+        _pending_first_part_signals[event.chat_id] = {
+            'pair': first_part_data['pair'],
+            'timeframe_minutes': first_part_data['timeframe_minutes'],
+            'timestamp': time.time()
+        }
+        _log(f"First part of two-part signal detected: Pair={first_part_data['pair']}, Timeframe=M{first_part_data['timeframe_minutes']}. Waiting for direction in chat {event.chat_id}.", "INFO")
+        return # First part stored, wait for second
+
+    # 3. If not a two-part signal (neither first nor second part), try the original single-message parser
+    # This is for existing signal formats like TWSBINARY or the fallback pattern.
+    original_format_signal_data = parse_signal_from_message(message_text)
+    if original_format_signal_data:
+        _log(f"Actionable signal (original single-message format) detected: {original_format_signal_data}", "INFO")
         _place_trade_from_signal(
-            pair=signal_data['pair'],
-            action=signal_data['action'],
-            amount=signal_data['amount'],
-            expiration_duration=signal_data['expiration']
+            pair=original_format_signal_data['pair'],
+            action=original_format_signal_data['action'],
+            amount=original_format_signal_data['amount'],
+            expiration_duration=original_format_signal_data['expiration']
         )
-    # else: # No need to log "no signal" for every message unless debugging
-    #     _log(f"No trade signal parsed from message.", "DEBUG")
-
+        return
 
 async def _run_telethon_listener_loop():
     """Internal async function to run the Telethon client."""

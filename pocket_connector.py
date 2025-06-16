@@ -1,12 +1,11 @@
-# /Users/Hubolux/Documents/Project 001/HuboluxJobs/Trading/PocketOptionAPI-v2/pocket_connector.py
 import time
 from pocketoptionapi.stable_api import PocketOption
 import pocketoptionapi.global_value as global_value
 
 # --- Configuration ---
-# ssid = """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"9b4dcc08de7b80bea558465493b51d00\\";s:10:\\"ip_address\\";s:13:\\"105.113.81.31\\";s:10:\\"user_agent\\";s:84:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0\\";s:13:\\"last_activity\\";i:1749932489;}d8061221af16bc4365cadb486106c099","isDemo":0,"uid":34048913,"platform":1,"isFastHistory":true}]"""
-ssid = """42["auth",{"session":"1620e72bltrkeb5e290f3etbcb","isDemo":1,"uid":34048913,"platform":1,"isFastHistory":true}]"""
-demo = True
+ssid = """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"4f46be8b31aea45b89855a575d82518a\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:84:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0\\";s:13:\\"last_activity\\";i:1750081924;}ea246a0c444dc18d9f286568ceb8e280","isDemo":0,"uid":104296609,"platform":1,"isFastHistory":true}]"""
+# ssid = """42["auth",{"session":"bpajv9apd668u8qkcdp4i34vc0","isDemo":1,"uid":104296609,"platform":1,"isFastHistory":true}]"""
+demo = False
 
 _api_instance = None
 _logger_initialized = False

@@ -2,7 +2,7 @@ import time, math, asyncio, json, threading
 from datetime import datetime
 # from pocketoptionapi.stable_api import PocketOption # Now handled by pocket_connector
 import pocketoptionapi.global_value as global_value
-import talib.abstract as ta
+# import talib.abstract as ta
 import numpy as np
 import pandas as pd
 import indicators as qtpylib
@@ -19,7 +19,7 @@ start_counter = time.perf_counter()
 
 # API object will be initialized via pocket_connector
 api = None
-min_payout = 80
+min_payout = 1
 period = 60
 expiration = 60
 
@@ -51,7 +51,7 @@ def main():
         api_instance=api_instance, # Use the local variable
         global_value_module=global_value,
         qtpylib_module=qtpylib,
-        ta_module=ta,
+        ta_module=None,
         period_val=period,
         min_payout_val=min_payout
     )
