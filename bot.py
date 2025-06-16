@@ -20,8 +20,8 @@ start_counter = time.perf_counter()
 
 # --- PocketOption Account Configurations for Workers ---
 POCKET_OPTION_ACCOUNTS = [
-    {'name': 'pelly_demo', 'ssid': """42["auth",{"session":"bpajv9apd668u8qkcdp4i34vc0","isDemo":1,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': True, 'enabled': True},
-    {'name': 'pelly_real', 'ssid': """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"2fdde4172af95443a5c227621595c835\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:117:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\\";s:13:\\"last_activity\\";i:1750091525;}e7561b1ef34608df6bc9731d4119ef1c","isDemo":0,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': False, 'enabled': False},
+    {'name': 'pelly_demo', 'ssid': """42["auth",{"session":"bpajv9apd668u8qkcdp4i34vc0","isDemo":1,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': True, 'enabled': False},
+    {'name': 'pelly_real', 'ssid': """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"2fdde4172af95443a5c227621595c835\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:117:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\\";s:13:\\"last_activity\\";i:1750091525;}e7561b1ef34608df6bc9731d4119ef1c","isDemo":0,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': False, 'enabled': True},
     {'name': 'tonami_demo', 'ssid': """42["auth",{"session":"1620e72bltrkeb5e290f3etbcb","isDemo":1,"uid":34048913,"platform":1,"isFastHistory":true}]""", 'demo': True, 'enabled': True},
     {'name': 'tonami_real', 'ssid': """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"09c3b588878f166204395267d358bfc2\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:84:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0\\";s:13:\\"last_activity\\";i:1750090512;}7abd18c3d9e5f0da2a9b4da0361ee5bd","isDemo":0,"uid":34048913,"platform":1,"isFastHistory":true}]""", 'demo': False, 'enabled': False},
 ]

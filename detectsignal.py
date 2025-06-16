@@ -46,6 +46,9 @@ PARTIAL_SIGNAL_TIMEOUT_SECONDS = 1000 # Timeout for waiting for the second part 
 # This will be a list of booleans, one for each configured and enabled client
 _telethon_listeners_started_successfully = []
 
+# Lock to serialize console input for Telethon authorization
+_input_lock = threading.Lock()
+
 
 def _log(message, level="INFO"):
     if _logger_function:
@@ -400,7 +403,7 @@ async def new_message_handler(event):
         )
         return
 
-async def _run_telethon_listener_loop(account_config, success_flags_list, listener_index):
+async def _run_telethon_listener_loop(account_config, success_flags_list, listener_index, auth_event):
     """
     Internal async function to run the Telethon client for a single account.
     Updates the success_flags_list for its specific index.
@@ -446,31 +449,47 @@ async def _run_telethon_listener_loop(account_config, success_flags_list, listen
             await client.send_code_request(phone_number)
             _log(f"{log_prefix} Telethon is waiting for you to enter the code sent to {phone_number}. Please check your Telegram messages.", "IMPORTANT")
             
-            # Signal that input is required (if an event is passed for this)
-            auth_event = account_config.get('_auth_event')
-            if auth_event:
-                auth_event.set() # Indicate that we are about to ask for input
-
-            while True:
-                try:
-                    code = input(f"Telethon ({session_name}): Enter the code for {phone_number}: ")
-                    await client.sign_in(phone_number, code)
-                    break
-                except EOFError:
-                    _log(f"{log_prefix} Could not read code from input (EOFError). Listener for {session_name} will not start.", "ERROR")
-                    await client.disconnect()
-                    return
-                except Exception as e:
-                    _log(f"{log_prefix} Sign-in error for {session_name}: {e}. If 2FA, provide password. Try code again.", "ERROR")
-                    if 'password' in str(e).lower(): # Basic check for 2FA password needed
-                         try:
-                            password = input(f"Telethon ({session_name}): 2FA Password for {phone_number}: ")
-                            await client.sign_in(password=password)
-                            break
-                         except Exception as p_err:
-                            _log(f"{log_prefix} 2FA password error for {session_name}: {p_err}. Listener will not start.", "ERROR")
-                            await client.disconnect() # Disconnect on 2FA failure
-                            return # Exit if 2FA fails
+            # The auth_event will be set *after* the input process (successful or failed)
+            # to ensure the main thread waits for this interactive step to complete.
+            _log(f"{log_prefix} Waiting to acquire input lock for authorization...", "DEBUG")
+            with _input_lock:
+                _log(f"{log_prefix} Acquired input lock. Ready for authorization input for {phone_number}.", "DEBUG")
+                signed_in_successfully_interactively = False
+                while True: # Loop for code entry, possibly 2FA
+                    try:
+                        code = input(f"Telethon ({session_name}): Enter the code for {phone_number}: ")
+                        await client.sign_in(phone_number, code)
+                        signed_in_successfully_interactively = True
+                        break # Signed in with code
+                    except EOFError:
+                        _log(f"{log_prefix} Could not read code from input (EOFError). Listener for {session_name} will not start.", "ERROR")
+                        # auth_event will be set in the finally block of this function
+                        if client.is_connected(): await client.disconnect()
+                        return
+                    except Exception as e:
+                        _log(f"{log_prefix} Sign-in error for {session_name}: {e}. If 2FA, provide password. Try code again.", "ERROR")
+                        if 'password' in str(e).lower(): # Basic check for 2FA password needed
+                             try:
+                                password = input(f"Telethon ({session_name}): 2FA Password for {phone_number}: ")
+                                await client.sign_in(password=password)
+                                signed_in_successfully_interactively = True
+                                break # Signed in with 2FA password
+                             except Exception as p_err:
+                                _log(f"{log_prefix} 2FA password error for {session_name}: {p_err}. Listener will not start.", "ERROR")
+                                # auth_event will be set in the finally block of this function
+                                if client.is_connected(): await client.disconnect()
+                                return # Exit if 2FA fails
+                        # If not a password error, or if password attempt fails and loops, user might try code again.
+                        # For simplicity, we break the loop on any non-password related exception during sign_in with code.
+                        if not ('password' in str(e).lower()):
+                            break # Exit input loop if sign_in with code failed for other reasons
+            # After input lock is released, signal the main thread.
+            if auth_event: # auth_event is passed as a parameter
+                auth_event.set()
+        else: # User is already authorized
+            _log(f"{log_prefix} User already authorized.", "INFO")
+            if auth_event: # Signal main thread that auth is already handled or not needed for input
+                auth_event.set()
 
         if await client.is_user_authorized():
             _log(f"{log_prefix} Client for {session_name} connected and authorized successfully.", "INFO")
@@ -489,8 +508,7 @@ async def _run_telethon_listener_loop(account_config, success_flags_list, listen
         _log(f"{log_prefix} An unexpected error occurred for {session_name}: {e}", "CRITICAL")
     finally:
         # Ensure the auth_event is set even on failure, so main thread doesn't hang indefinitely if it was waiting.
-        auth_event = account_config.get('_auth_event')
-        if auth_event and not auth_event.is_set():
+        if auth_event and not auth_event.is_set(): # Use the passed auth_event parameter
             auth_event.set()
         if client.is_connected():
             _log(f"{log_prefix} Disconnecting Telethon client...", "INFO")
@@ -545,7 +563,7 @@ def start_signal_detector(api_instance, global_value_mod, buy_func, prep_history
             asyncio.set_event_loop(loop)
             try:
                 # _run_telethon_listener_loop will set current_auth_event if it needs input
-                loop.run_until_complete(_run_telethon_listener_loop(config, flags_list, index))
+                loop.run_until_complete(_run_telethon_listener_loop(config, flags_list, index, current_auth_event))
             finally:
                 if not current_auth_event.is_set(): # Ensure event is set if loop exits unexpectedly
                     current_auth_event.set()
@@ -568,14 +586,14 @@ def start_signal_detector(api_instance, global_value_mod, buy_func, prep_history
         # if it doesn't hit the `input()` block. The success_flags_list[idx] will indicate success.
         # The main purpose of auth_event is to serialize the input() calls.
         _log(f"Waiting for authorization phase for {account_conf['SESSION_NAME']}...", "DEBUG")
-        auth_completed_or_not_needed = auth_event.wait(timeout=120) # Wait up to 2 minutes for input phase
+        auth_completed_or_not_needed = auth_event.wait(timeout=300) # Wait up to 5 minutes for input phase completion
 
         if not auth_completed_or_not_needed:
-            _log(f"Timeout waiting for authorization input phase for {account_conf['SESSION_NAME']}. It might be stuck or already failed.", "WARNING")
+            _log(f"Timeout waiting for {account_conf['SESSION_NAME']} to complete its authorization phase (input or already authorized). It might be stuck or failed.", "WARNING")
             # The thread might still be running if it's stuck before setting the event.
             # _telethon_listeners_started_successfully[idx] will reflect its actual startup success later.
         else:
-            _log(f"Authorization phase for {account_conf['SESSION_NAME']} passed or not required.", "DEBUG")
+            _log(f"Authorization phase for {account_conf['SESSION_NAME']} completed (or was not required). Proceeding.", "DEBUG")
 
     # After attempting to start all threads and waiting for their auth phases:
     # Give a final short wait for all threads to fully establish their run_until_disconnected or fail.
