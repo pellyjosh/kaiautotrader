@@ -20,8 +20,8 @@ TELEGRAM_ACCOUNTS_CONFIG = [
         'API_HASH': 'fdcd53d426aebd07096ff326bb124397',
         'PHONE_NUMBER': '+2348101572723',
         'SESSION_NAME': 'my_signal_listener', # Ensure unique session names
-        # 'TARGET_GROUP_IDENTIFIER': -1002153677822, # Group for Account 1
-        'TARGET_GROUP_IDENTIFIER' : -1002546061495,  #Test Channel
+        'TARGET_GROUP_IDENTIFIER': -1002153677822, # Group for Account 1
+        # 'TARGET_GROUP_IDENTIFIER' : -1002546061495,  #Test Channel
         'ENABLED': True # Allows you to easily enable/disable this account
     },
     {
