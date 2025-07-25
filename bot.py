@@ -5,26 +5,74 @@ import pocketoptionapi.global_value as global_value
 # import talib.abstract as ta
 import numpy as np
 import pandas as pd
-import indicators as qtpylib
+# from tools import indicators as qtpylib
 
 # Import the new connector and the signal detector
 import pocket_connector
 import detectsignal
 import worker # Import the new worker module
-import pocket_functions # Import the new functions module
+# import tools.pocket_functions as pocket_functions # Import the new functions module
+
+# Database imports
+from db.database_manager import DatabaseManager
+from db.database_config import DATABASE_TYPE, SQLITE_DB_PATH, MYSQL_CONFIG
 
 global_value.loglevel = 'DEBUG' # Changed to DEBUG for more verbose Telethon logs initially
 
 # Session configuration
 start_counter = time.perf_counter()
 
-# --- PocketOption Account Configurations for Workers ---
-POCKET_OPTION_ACCOUNTS = [
-    {'name': 'pelly_demo', 'ssid': """42["auth",{"session":"bpajv9apd668u8qkcdp4i34vc0","isDemo":1,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': True, 'enabled': False},
-    {'name': 'pelly_real', 'ssid': """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"2fdde4172af95443a5c227621595c835\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:117:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\\";s:13:\\"last_activity\\";i:1750091525;}e7561b1ef34608df6bc9731d4119ef1c","isDemo":0,"uid":104296609,"platform":1,"isFastHistory":true}]""", 'demo': False, 'enabled': True},
-    {'name': 'tonami_demo', 'ssid': """42["auth",{"session":"1620e72bltrkeb5e290f3etbcb","isDemo":1,"uid":34048913,"platform":1,"isFastHistory":true}]""", 'demo': True, 'enabled': True},
-    {'name': 'tonami_real', 'ssid': """42["auth",{"session":"a:4:{s:10:\\"session_id\\";s:32:\\"09c3b588878f166204395267d358bfc2\\";s:10:\\"ip_address\\";s:14:\\"105.113.62.151\\";s:10:\\"user_agent\\";s:84:\\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0\\";s:13:\\"last_activity\\";i:1750090512;}7abd18c3d9e5f0da2a9b4da0361ee5bd","isDemo":0,"uid":34048913,"platform":1,"isFastHistory":true}]""", 'demo': False, 'enabled': False},
-]
+# --- Database Configuration and Account Management ---
+def initialize_database_and_accounts():
+    """Initialize database connection and load accounts from database"""
+    try:
+        # Initialize database connection
+        if DATABASE_TYPE.lower() == "mysql":
+            db = DatabaseManager(db_type="mysql", **MYSQL_CONFIG)
+            global_value.logger("[BotMain] Connected to MySQL database", "INFO")
+        else:
+            db = DatabaseManager(db_type="sqlite", db_path=SQLITE_DB_PATH)
+            global_value.logger("[BotMain] Connected to SQLite database", "INFO")
+        
+        # Check if accounts exist in database
+        existing_accounts = db.get_all_accounts()
+        if not existing_accounts:
+            global_value.logger("[BotMain] No accounts found in database.", "WARNING")
+            global_value.logger("[BotMain] Please add accounts using: python manage_accounts.py add <name> <ssid> --demo <true/false> --enabled <true/false>", "INFO")
+            global_value.logger("[BotMain] Or run: python migrate_accounts.py to migrate from hardcoded accounts", "INFO")
+        else:
+            enabled_count = len(db.get_enabled_accounts())
+            global_value.logger(f"[BotMain] Found {len(existing_accounts)} total accounts in database ({enabled_count} enabled)", "INFO")
+        
+        return db
+        
+    except Exception as e:
+        global_value.logger(f"[BotMain] Failed to initialize database: {e}", "CRITICAL")
+        return None
+
+def load_pocket_option_accounts_from_db(db):
+    """Load enabled PocketOption accounts from database"""
+    try:
+        enabled_accounts = db.get_enabled_accounts()
+        pocket_option_accounts = []
+        
+        for account in enabled_accounts:
+            config = {
+                'name': account['worker_name'],
+                'ssid': account['ssid'],
+                'demo': bool(account['is_demo']),
+                'enabled': bool(account['enabled'])
+            }
+            pocket_option_accounts.append(config)
+            global_value.logger(f"[BotMain] Loaded account from DB: {config['name']} (Demo: {config['demo']}, Enabled: {config['enabled']})", "DEBUG")
+        
+        global_value.logger(f"[BotMain] Loaded {len(pocket_option_accounts)} enabled accounts from database", "INFO")
+        return pocket_option_accounts
+        
+    except Exception as e:
+        global_value.logger(f"[BotMain] Failed to load accounts from database: {e}", "ERROR")
+        return []
+
 
 worker_manager = None # Will be an instance of PocketWorkerManager
 
@@ -32,6 +80,7 @@ worker_manager = None # Will be an instance of PocketWorkerManager
 min_payout = 1
 period = 60
 expiration = 60
+single_trade_policy = True
 
 # All functions like get_payout, get_df, buy, buy2, make_df, strategie, etc.,
 # are now moved to pocket_functions.py
@@ -39,10 +88,76 @@ expiration = 60
 # ... imports and initial global declarations (like api = None, min_payout, etc.)
 
 class PocketWorkerManager:
-    def __init__(self, account_configs):
-        self.configs = account_configs
-        self.workers = {}  # {'name': {'process': Process, 'cmd_q': Queue, 'resp_q': Queue}}
-        self._start_workers()
+    def __init__(self, po_configs):
+        self.configs = po_configs
+        self.workers = {}
+        self.running = True
+        self.result_monitor_thread = None
+    
+    def start_result_monitoring(self):
+        """Start background thread to monitor trade results from workers"""
+        if self.result_monitor_thread and self.result_monitor_thread.is_alive():
+            return
+            
+        def monitor_results():
+            global_value.logger("[WorkerManager] Starting trade result monitoring thread", "INFO")
+            while self.running:
+                try:
+                    for worker_name, worker_info in self.workers.items():
+                        if not worker_info['process'].is_alive():
+                            continue
+                            
+                        # Check for any pending responses (including trade results)
+                        try:
+                            while True:
+                                response = worker_info['resp_q'].get_nowait()
+                                self._handle_worker_response(worker_name, response)
+                        except multiprocessing.queues.Empty:
+                            pass  # No more responses
+                        
+                    time.sleep(1)  # Check every second
+                except Exception as e:
+                    global_value.logger(f"[WorkerManager] Error in result monitoring: {e}", "ERROR")
+                    
+        self.result_monitor_thread = threading.Thread(target=monitor_results, daemon=True)
+        self.result_monitor_thread.start()
+    
+    def _handle_worker_response(self, worker_name, response):
+        """Handle responses from workers, especially trade results"""
+        if not response:
+            return
+            
+        status = response.get('status')
+        
+        if status == 'trade_completed':
+            # Trade result received - update Martingale system
+            data = response.get('data', {})
+            trade_id = data.get('trade_id')
+            profit = data.get('profit')
+            result = data.get('result')  # "win" or "loose"
+            
+            global_value.logger(f"[WorkerManager] Trade result received from {worker_name}: {trade_id} -> {result} (${profit})", "INFO")
+            
+            # Import detectsignal to call the result handler
+            try:
+                from detectsignal import _handle_trade_result
+                # Convert "loose" to "loss" for consistency
+                result_status = "win" if result == "win" else "loss"
+                symbol = data.get('symbol', 'unknown_symbol')  # Get symbol from trade data
+                _handle_trade_result(trade_id, symbol, result_status, profit, worker_name)
+                global_value.logger(f"[WorkerManager] Updated Martingale system with trade {trade_id} result: {result_status} for account {worker_name}", "INFO")
+            except Exception as e:
+                global_value.logger(f"[WorkerManager] Error updating Martingale system: {e}", "ERROR")
+                
+        elif status == 'trade_timeout':
+            # Trade monitoring timed out
+            data = response.get('data', {})
+            trade_id = data.get('trade_id')
+            global_value.logger(f"[WorkerManager] Trade monitoring timeout for {trade_id} from {worker_name}", "WARNING")
+            
+        else:
+            # Regular command response - log for debugging
+            global_value.logger(f"[WorkerManager] Response from {worker_name}: {response}", "DEBUG")
 
     def _start_workers(self):
         if not self.configs:
@@ -68,6 +183,9 @@ class PocketWorkerManager:
             process.start()
             self.workers[name] = {'process': process, 'cmd_q': cmd_q, 'resp_q': resp_q}
             global_value.logger(f"[WorkerManager] Launched worker process for account: {name}", "INFO")
+        
+        # Start trade result monitoring
+        self.start_result_monitoring()
 
     def send_command(self, account_name, action, params=None, timeout=15):
         if account_name not in self.workers:
@@ -108,6 +226,8 @@ class PocketWorkerManager:
 
     def shutdown_all(self, timeout=5):
         global_value.logger("[WorkerManager] Initiating shutdown of all worker processes...", "INFO")
+        self.running = False  # Stop result monitoring
+        
         for name, worker_info in self.workers.items():
             if worker_info['process'].is_alive():
                 try:
@@ -137,13 +257,28 @@ def main():
     success_color_code = "\033[92m"
     reset_color_code = "\033[0m"
 
-    # Initialize the PocketWorkerManager
-    worker_manager = PocketWorkerManager(POCKET_OPTION_ACCOUNTS)
+    # Initialize database and load accounts
+    global_value.logger("[BotMain] Initializing database and loading account configurations...", "INFO")
+    db = initialize_database_and_accounts()
+    if not db:
+        global_value.logger("[BotMain] CRITICAL: Failed to initialize database. Terminating.", "CRITICAL")
+        exit(1)
+    
+    # Load PocketOption accounts from database
+    pocket_option_accounts = load_pocket_option_accounts_from_db(db)
+    if not pocket_option_accounts:
+        global_value.logger("[BotMain] WARNING: No enabled accounts found in database. Please check your account configurations.", "WARNING")
+    
+    # Initialize the PocketWorkerManager with accounts from database
+    worker_manager = PocketWorkerManager(pocket_option_accounts)
+    
+    # Start the workers
+    worker_manager._start_workers()
 
     # Optional: Check initial connectivity of workers (example for the first one)
     # Check connectivity for ALL enabled workers
     successfully_connected_workers = 0
-    enabled_po_accounts = [acc for acc in POCKET_OPTION_ACCOUNTS if acc.get('enabled', True)]
+    enabled_po_accounts = [acc for acc in pocket_option_accounts if acc.get('enabled', True)]
 
     if enabled_po_accounts and worker_manager.workers:
         for acc_config in enabled_po_accounts:
@@ -154,6 +289,13 @@ def main():
                 if balance_response and balance_response.get('status') == 'success':
                     global_value.logger(f"[BotMain] Worker {account_name} connected. Balance: {balance_response['data']['balance']}", "INFO")
                     successfully_connected_workers += 1
+                    
+                    # Update balance in database
+                    try:
+                        balance = float(balance_response['data']['balance'])
+                        db.update_account_balance(account_name, balance)
+                    except (ValueError, KeyError):
+                        global_value.logger(f"[BotMain] Could not parse balance for {account_name}", "WARNING")
                 else:
                     global_value.logger(f"[BotMain] Worker {account_name} failed initial check or timed out. Response: {balance_response}", "ERROR")
     
@@ -167,8 +309,10 @@ def main():
     # For now, we'll adapt the functions passed to detectsignal.
 
     # --- Define functions to be used by detectsignal ---
-    def place_trade_via_worker_manager(amount, pair, action, expiration_duration, target_po_account_name=None):
+    def place_trade_via_worker_manager(amount, pair, action, expiration_duration, target_po_account_name=None, tracking_id=None):
         """Places a trade using a specified (or default) PO worker."""
+        # Ensure amount is a float, not Decimal for JSON serialization
+        amount = float(amount) if hasattr(amount, '__float__') else amount
         trade_params = {'amount': amount, 'pair': pair, 'action': action, 'expiration_duration': expiration_duration}
         
         success_color_code = "\033[92m"  # Green
@@ -183,8 +327,8 @@ def main():
         if target_po_account_name == 'ALL_ENABLED_WORKERS':
             global_value.logger(f"[BotMain] Relaying trade to ALL ENABLED workers: {pair} {action} ${amount} for {expiration_duration}s", "INFO")
             for worker_name in worker_manager.workers.keys():
-                # Check if this worker corresponds to an enabled account in POCKET_OPTION_ACCOUNTS
-                config = next((acc for acc in POCKET_OPTION_ACCOUNTS if acc['name'] == worker_name and acc.get('enabled', True)), None)
+                # Check if this worker corresponds to an enabled account in pocket_option_accounts
+                config = next((acc for acc in pocket_option_accounts if acc['name'] == worker_name and acc.get('enabled', True)), None)
                 if config and worker_manager.workers[worker_name]['process'].is_alive():
                     target_workers_to_trade.append(worker_name)
             if not target_workers_to_trade:
@@ -192,7 +336,7 @@ def main():
                 return {'status': 'error', 'message': 'No enabled/alive workers found'}
         elif target_po_account_name is None:
             # Default to the first enabled account if no specific target and not "ALL"
-            enabled_accounts_for_trade = [acc['name'] for acc in POCKET_OPTION_ACCOUNTS if acc.get('enabled', True) and acc['name'] in worker_manager.workers and worker_manager.workers[acc['name']]['process'].is_alive()]
+            enabled_accounts_for_trade = [acc['name'] for acc in pocket_option_accounts if acc.get('enabled', True) and acc['name'] in worker_manager.workers and worker_manager.workers[acc['name']]['process'].is_alive()]
             if not enabled_accounts_for_trade:
                 global_value.logger("[BotMain] No PocketOption accounts configured for trading.", "ERROR")
                 return {'status': 'error', 'message': 'No default enabled/alive worker found'}
@@ -210,6 +354,34 @@ def main():
                 overall_success = False
             else:
                 global_value.logger(f"{success_color_code}[BotMain] Trade command sent to '{worker_name_to_trade}' successfully. Worker response: {response.get('data')}{reset_color_code}", "INFO")
+                
+                # Extract trade ID for Martingale tracking if available
+                trade_data = response.get('data', {})
+                if isinstance(trade_data, dict) and 'trade_id' in trade_data:
+                    trade_id = trade_data['trade_id']
+                    expiration_time = trade_data.get('exp_ts', time.time() + expiration_duration)
+                    global_value.logger(f"[BotMain] Tracking trade {trade_id} for Martingale system", "INFO")
+                    
+                    # Update pending trade tracking with real PocketOption trade ID
+                    # The worker already saved the trade to database, so we just need to update our tracking
+                    if tracking_id:
+                        from detectsignal import _save_pending_trade_with_real_id
+                        if _save_pending_trade_with_real_id(tracking_id, trade_id):
+                            global_value.logger(f"[BotMain] Updated trade tracking to use PocketOption ID: {trade_id}", "DEBUG")
+                        else:
+                            global_value.logger(f"[BotMain] Failed to update trade tracking - no pending data for tracking ID: {tracking_id}", "WARNING")
+                    
+                    # Start monitoring trade result for Martingale system
+                    monitor_params = {
+                        'trade_id': trade_id,
+                        'expiration_time': expiration_time,
+                        'symbol': pair  # Pass the symbol for Martingale tracking
+                    }
+                    monitor_response = worker_manager.send_command(worker_name_to_trade, 'monitor_trade', params=monitor_params, timeout=5)
+                    if monitor_response and monitor_response.get('status') == 'success':
+                        global_value.logger(f"[BotMain] Started monitoring trade {trade_id} for results", "DEBUG")
+                    else:
+                        global_value.logger(f"[BotMain] Failed to start trade monitoring for {trade_id}: {monitor_response}", "WARNING")
         
         return {'status': 'success' if overall_success else 'partial_error', 'details': all_responses}
 
@@ -220,7 +392,7 @@ def main():
         """
         if target_po_account_name is None:
             # If no specific target, use the first *enabled* PO account
-            enabled_accounts_for_history = [acc['name'] for acc in POCKET_OPTION_ACCOUNTS if acc.get('enabled', True)]
+            enabled_accounts_for_history = [acc['name'] for acc in pocket_option_accounts if acc.get('enabled', True)]
             if not enabled_accounts_for_history:
                 global_value.logger("[BotMain] No PocketOption accounts configured for prepare_history.", "ERROR")
                 return False
@@ -265,6 +437,16 @@ def main():
         global_value.logger(f"[BotMain] Bot shutting down due to Telethon startup failure. Total runtime: {total_runtime:.2f} seconds", "INFO")
         exit(1)
 
+    # Initialize Martingale system - settings will be loaded per-account from database
+    # Note: No longer passing hardcoded values - each account uses its own DB settings
+    detectsignal.initialize_martingale_system_from_database()
+    global_value.logger(f"[BotMain] Martingale system initialized with per-account settings from database", "INFO")
+    
+    # Configure single trade policy
+    detectsignal.configure_single_trade_policy(single_trade_policy)
+    policy_status = "ENABLED" if single_trade_policy else "DISABLED"
+    global_value.logger(f"[BotMain] Single trade policy: {policy_status}", "INFO")
+
     global_value.logger(f"[BotMain] Main setup finished in {time.perf_counter() - main_setup_start_time:.2f} seconds. Signal detector is running.", "INFO")
     global_value.logger(f'{success_color_code}[BotMain] Bot is now listening for Telegram signals. Press Ctrl+C to exit.{reset_color_code}', "INFO")
 
@@ -272,8 +454,58 @@ def main():
         # Keep the main thread alive. The Telethon listener runs in a daemon thread
         # started by detectsignal.py. If this main thread exits, the daemon thread will also exit.
         # We can use an event or a simple loop.
+        last_martingale_status_check = 0
         while True:
             time.sleep(1) # Keep main thread alive, checking for KeyboardInterrupt
+            
+            # Periodically log Martingale status (every 60 seconds)
+            current_time = time.time()
+            if current_time - last_martingale_status_check >= 60:
+                martingale_status = detectsignal.get_current_martingale_status()
+                single_trade_policy_status = "ENABLED" if martingale_status.get('single_trade_policy_enabled', True) else "DISABLED"
+                status_msg = f"[BotMain] Trading Status - Single Trade Policy: {single_trade_policy_status}, Martingale: "
+                if martingale_status['martingale_enabled']:
+                    status_msg += f"ENABLED, "
+                    status_msg += f"Total Active Trades: {martingale_status['active_trades_count']}, "
+                    status_msg += f"Current Active Trade: {martingale_status['current_active_trade']}"
+                    
+                    # Show per-account status for ENABLED accounts only
+                    account_states = martingale_status.get('account_states', {})
+                    active_trades_per_account = martingale_status.get('active_trades_per_account', {})
+                    
+                    # Get enabled accounts from database
+                    enabled_accounts = db.get_enabled_accounts()
+                    enabled_account_names = [acc['worker_name'] for acc in enabled_accounts]
+                    
+                    if account_states and enabled_account_names:
+                        status_msg += " | Enabled Account Status: "
+                        account_info = []
+                        for account in enabled_account_names:
+                            if account in account_states:
+                                state = account_states[account]
+                                consecutive_losses = state['consecutive_losses']
+                                queue_length = len(state['martingale_queue'])
+                                active_trade = active_trades_per_account.get(account, None)
+                                
+                                # Get account-specific settings from database
+                                account_data = next((acc for acc in enabled_accounts if acc['worker_name'] == account), None)
+                                if account_data:
+                                    base_amount = account_data['base_amount']
+                                    multiplier = account_data['martingale_multiplier']
+                                    account_martingale_enabled = account_data['martingale_enabled']
+                                    
+                                    account_status = f"{account}(Base:${base_amount}, Mult:{multiplier}x, Mart:{'On' if account_martingale_enabled else 'Off'}, Losses:{consecutive_losses}, Queue:{queue_length}"
+                                    if active_trade:
+                                        account_status += f", Active:{active_trade}"
+                                    account_status += ")"
+                                    account_info.append(account_status)
+                        
+                        status_msg += ", ".join(account_info)
+                else:
+                    status_msg += "DISABLED"
+                
+                global_value.logger(status_msg, "INFO")
+                last_martingale_status_check = current_time
     except KeyboardInterrupt:
         global_value.logger("[BotMain] KeyboardInterrupt received. Shutting down...", "INFO")
     finally:

@@ -1,0 +1,29 @@
+[Unit]
+Description=HuboluxAutoTrader Trading Bot
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=tradingbot
+Group=tradingbot
+WorkingDirectory=/opt/HuboluxAutoTrader
+Environment=PATH=/opt/HuboluxAutoTrader/venv/bin
+ExecStart=/opt/HuboluxAutoTrader/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/HuboluxAutoTrader/logs/bot.log
+StandardError=append:/opt/HuboluxAutoTrader/logs/bot.error.log
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=1G
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/HuboluxAutoTrader /opt/HuboluxAutoTrader/logs /tmp
+
+[Install]
+WantedBy=multi-user.target

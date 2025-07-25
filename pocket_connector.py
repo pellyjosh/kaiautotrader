@@ -149,3 +149,72 @@ def check_connection(timeout_seconds=10):
     # If it reaches here, it implies an issue with the loop logic, which shouldn't happen.
     global_value.logger("[PocketConnector] Exited check_connection logic unexpectedly.", "ERROR")
     return False
+
+def check_trade_result(trade_id, timeout_seconds=180):
+    """
+    Check the result of a specific trade by trade_id.
+    Returns (profit, status) where status is "win", "loose", or "unknown"
+    """
+    _ensure_logger_initialized()
+    global_value.logger(f"[PocketConnector] Checking result for trade {trade_id}...", "DEBUG")
+    
+    api = get_api_instance()
+    if not api:
+        global_value.logger("[PocketConnector] No API instance available for trade result check", "ERROR")
+        return None, "error"
+    
+    try:
+        return api.check_win(trade_id)
+    except Exception as e:
+        global_value.logger(f"[PocketConnector] Error checking trade {trade_id}: {e}", "ERROR")
+        return None, "error"
+
+def monitor_trade_result(trade_id, expiration_time=None, callback=None):
+    """
+    Monitor a trade and call callback when result is available.
+    
+    Args:
+        trade_id: The trade ID to monitor
+        expiration_time: Expected expiration timestamp (optional)
+        callback: Function to call with (trade_id, profit, status) when result is ready
+    """
+    import threading
+    
+    def monitor_thread():
+        _ensure_logger_initialized()
+        global_value.logger(f"[PocketConnector] Starting background monitoring for trade {trade_id}", "INFO")
+        
+        # Calculate monitoring timeout
+        if expiration_time:
+            monitor_timeout = expiration_time + 30  # 30 seconds after expiration
+        else:
+            monitor_timeout = time.time() + 180  # Default 3 minutes
+        
+        start_time = time.time()
+        
+        while time.time() < monitor_timeout:
+            try:
+                profit, status = check_trade_result(trade_id, timeout_seconds=5)
+                
+                if status in ["win", "loose"]:
+                    global_value.logger(f"[PocketConnector] Trade {trade_id} completed: {status}, profit: {profit}", "INFO")
+                    if callback:
+                        callback(trade_id, profit, status)
+                    return
+                elif status == "unknown":
+                    global_value.logger(f"[PocketConnector] Trade {trade_id} still pending...", "DEBUG")
+                
+            except Exception as e:
+                global_value.logger(f"[PocketConnector] Error monitoring trade {trade_id}: {e}", "WARNING")
+            
+            time.sleep(3)  # Check every 3 seconds
+        
+        # Timeout reached
+        global_value.logger(f"[PocketConnector] Trade {trade_id} monitoring timed out after {time.time() - start_time:.1f} seconds", "WARNING")
+        if callback:
+            callback(trade_id, None, "timeout")
+    
+    # Start monitoring in background thread
+    thread = threading.Thread(target=monitor_thread, daemon=True)
+    thread.start()
+    return thread
