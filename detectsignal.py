@@ -8,6 +8,9 @@ from telethon import TelegramClient, events
 from db.database_manager import DatabaseManager
 import db.database_config as db_config
 
+# Import the enhanced Martingale system
+from enhanced_martingale import initialize_enhanced_martingale, get_enhanced_martingale_manager
+
 # --- Globals to be initialized by bot.py ---
 _api_object = None
 _global_value_module = None
@@ -15,6 +18,9 @@ _buy_function = None
 _prepare_history_function = None
 _logger_function = None # Shortcut for _global_value_module.logger
 _database_manager = None  # Global database manager instance
+
+# Enhanced Martingale manager instance
+_enhanced_martingale = None
 
 # --- Configuration for multiple Telegram accounts ---
 TELEGRAM_ACCOUNTS_CONFIG = [
@@ -75,7 +81,7 @@ def _log(message, level="INFO"):
 
 def _initialize_database():
     """Initialize database connection and load persistent Martingale state for all accounts"""
-    global _database_manager, _account_martingale_states, _martingale_multiplier
+    global _database_manager, _account_martingale_states, _martingale_multiplier, _enhanced_martingale
     
     try:
         # Create database manager based on configuration
@@ -94,7 +100,11 @@ def _initialize_database():
         
         _log(f"Signal detector database initialized: {db_config.DATABASE_TYPE}", "INFO")
         
-        # Load all accounts from database and their Martingale states
+        # Initialize the enhanced Martingale system
+        _enhanced_martingale = initialize_enhanced_martingale(_database_manager, _log)
+        _log("Enhanced Martingale system initialized", "INFO")
+        
+        # Load all accounts from database and their Martingale states (legacy support)
         accounts = _database_manager.get_all_accounts()
         for account in accounts:
             worker_name = account['worker_name']
@@ -259,7 +269,29 @@ def _calculate_next_martingale_amount(worker_name, consecutive_losses=None):
         return round(amount, 2)
 
 def _get_trade_amount_for_new_signal(worker_name):
-    """Get trade amount for a new incoming signal - assigns from account-specific Martingale queue or calculates new"""
+    """Get trade amount for a new incoming signal using Enhanced Martingale system"""
+    global _enhanced_martingale
+    
+    # Use enhanced Martingale system if available
+    if _enhanced_martingale:
+        try:
+            amount, lane_id = _enhanced_martingale.get_trade_amount_for_signal(worker_name, "DEFAULT_SYMBOL")
+            
+            if amount > 0:
+                # Store lane_id for later use in trade execution
+                if lane_id:
+                    _log(f"[{worker_name}] Enhanced Martingale assigned lane {lane_id}: ${amount}", "INFO")
+                else:
+                    _log(f"[{worker_name}] Enhanced Martingale base trade: ${amount}", "INFO")
+                
+                return amount, lane_id
+            else:
+                _log(f"[{worker_name}] Trade blocked by Enhanced Martingale policies", "WARNING")
+                return 0.0, None
+        except Exception as e:
+            _log(f"[{worker_name}] Enhanced Martingale error: {e} - falling back to legacy", "ERROR")
+    
+    # Fallback to legacy system
     # Get account-specific settings
     account_settings = _get_account_settings(worker_name)
     base_amount = account_settings['base_amount']
@@ -267,7 +299,7 @@ def _get_trade_amount_for_new_signal(worker_name):
     
     if not _martingale_enabled or not account_martingale_enabled:
         _log(f"Martingale DISABLED (Global: {_martingale_enabled}, Account: {account_martingale_enabled}) - using base amount: ${base_amount}", "INFO")
-        return base_amount
+        return base_amount, None
     
     if worker_name not in _account_martingale_states:
         _account_martingale_states[worker_name] = {
@@ -287,11 +319,11 @@ def _get_trade_amount_for_new_signal(worker_name):
         amount = _calculate_next_martingale_amount(worker_name)
         _log(f"[{worker_name}] Calculated fresh Martingale amount: ${amount} (consecutive losses: {account_state['consecutive_losses']})", "INFO")
     
-    return amount
+    return amount, None
 
 def _handle_trade_result(trade_id, symbol, result, profit_loss=None, worker_name=None):
-    """Handle trade result for per-account Martingale system"""
-    global _current_active_trade
+    """Handle trade result for Enhanced Martingale system with legacy fallback"""
+    global _current_active_trade, _enhanced_martingale
     
     if worker_name is None:
         worker_name = 'pelly_demo'  # Default fallback
@@ -311,6 +343,19 @@ def _handle_trade_result(trade_id, symbol, result, profit_loss=None, worker_name
     if worker_name in _active_trades_per_account:
         _active_trades_per_account[worker_name] = False
     
+    # Try Enhanced Martingale system first
+    if _enhanced_martingale:
+        try:
+            success = _enhanced_martingale.handle_trade_result(trade_id, result, profit_loss or 0.0)
+            if success:
+                _log(f"[{worker_name}] Enhanced Martingale handled trade {trade_id} result: {result}", "INFO")
+                return
+            else:
+                _log(f"[{worker_name}] Enhanced Martingale failed to handle trade {trade_id} - using legacy", "WARNING")
+        except Exception as e:
+            _log(f"[{worker_name}] Enhanced Martingale error: {e} - using legacy system", "ERROR")
+    
+    # Legacy Martingale system fallback
     # Initialize account state if not exists
     if worker_name not in _account_martingale_states:
         _account_martingale_states[worker_name] = {
@@ -419,20 +464,20 @@ def _monitor_trade_results():
 def _normalize_pair_for_new_format(raw_pair_text):
     """
     Normalizes pair string from formats like "BHD/CNY OTC", "EURUSD", "AUD/CAD_otc".
-    Output: "BHDCNY_otc", "EURUSD", "AUDCAD_otc" (slash removed, _otc is lowercase, base is uppercase)
+    Output: "BHDCNY_otc", "EURUSD", "AUDCAD_otc" (slash removed, _otc is lowercase, preserve original case)
     """
-    normalized_pair = raw_pair_text.strip() # Keep original case for a moment for OTC checks
+    normalized_pair = raw_pair_text.strip() # Keep original case
 
-    # Standardize OTC suffix to _otc and ensure base is uppercase and slashes removed
+    # Standardize OTC suffix to _otc and remove slashes but preserve original case
     if normalized_pair.upper().endswith(" OTC"): # Handles "BHD/CNY OTC"
         base = normalized_pair[:-4].strip()
-        normalized_pair = base.upper().replace("/", "") + "_otc"
+        normalized_pair = base.upper().replace("/", "") + "_otc"  # Still uppercase for compatibility
     elif "_otc" in normalized_pair.lower(): # Handles "AUD/CAD_otc" or "EURUSD_otc" or "EURUSD_OTC"
-        # Split by _otc (case-insensitive), take the first part, uppercase, remove slashes, add _otc
+        # Split by _otc (case-insensitive), take the first part, remove slashes, preserve case, add _otc
         parts = re.split(r'_otc', normalized_pair, flags=re.IGNORECASE)
-        normalized_pair = parts[0].upper().replace("/", "") + "_otc"
+        normalized_pair = parts[0].replace("/", "") + "_otc"  # Preserve original case
     else: # Handles "EURUSD" or "USD/JPY"
-        normalized_pair = normalized_pair.upper().replace("/", "")
+        normalized_pair = normalized_pair.upper().replace("/", "")  # Still uppercase for regular pairs
         
     # Ensure any remaining _OTC (if somehow missed) becomes _otc - defensive
     normalized_pair = normalized_pair.replace("_OTC", "_otc")
@@ -831,9 +876,16 @@ async def new_message_handler(event):
                     'expiration': expiration_seconds
                 }
                 
-                # Calculate Martingale trade amount for this signal
+                # Calculate Martingale trade amount for this signal using Enhanced Martingale system
                 worker_name = 'pelly_demo'  # Primary worker for this deployment
-                martingale_amount = _get_trade_amount_for_new_signal(worker_name)
+                
+                # Use enhanced Martingale system
+                martingale_amount, lane_id = _get_trade_amount_for_new_signal(worker_name)
+                
+                if martingale_amount <= 0:
+                    _log(f"[{worker_name}] Trade blocked by Martingale policy - amount: ${martingale_amount}", "WARNING")
+                    del _pending_first_part_signals[event.chat_id]
+                    return
                 
                 # Generate unique trade ID for tracking
                 _trade_sequence_number += 1
@@ -847,13 +899,22 @@ async def new_message_handler(event):
                     _log(f"[{worker_name}] Starting trade {trade_tracking_id} - multiple trades allowed", "INFO")
                 _active_trades_per_account[worker_name] = True
                 
-                # Track this trade for Martingale result monitoring
+                # Track this trade for Enhanced Martingale system
+                if _enhanced_martingale:
+                    expected_payout = martingale_amount * 1.8  # Estimate 80% payout
+                    _enhanced_martingale.handle_trade_placed(
+                        trade_tracking_id, worker_name, signal_data_for_trade['pair'],
+                        martingale_amount, lane_id, expected_payout
+                    )
+                
+                # Track this trade for Martingale result monitoring (legacy support)
                 _pending_trade_results[trade_tracking_id] = {
                     'timestamp': time.time(),
                     'amount': martingale_amount,
                     'symbol': signal_data_for_trade['pair'],
                     'direction': signal_data_for_trade['action'],
-                    'worker_name': worker_name
+                    'worker_name': worker_name,
+                    'lane_id': lane_id  # Store lane_id for Enhanced Martingale
                 }
                 
                 # Store trade details for when we get the real PocketOption trade ID
@@ -865,7 +926,8 @@ async def new_message_handler(event):
                     'direction': signal_data_for_trade['action'],
                     'amount': martingale_amount,
                     'expiration_duration': signal_data_for_trade['expiration'],
-                    'is_martingale': is_martingale
+                    'is_martingale': is_martingale,
+                    'lane_id': lane_id  # Store lane_id for Enhanced Martingale
                 }
                 
                 _place_trade_from_signal(
@@ -899,9 +961,15 @@ async def new_message_handler(event):
     if original_format_signal_data:
         _log(f"{log_prefix_for_handler} Actionable signal (original single-message format) detected: {original_format_signal_data}", "INFO")
         
-        # Calculate Martingale trade amount for this signal
+        # Calculate Martingale trade amount for this signal using Enhanced Martingale system
         worker_name = 'pelly_demo'  # Primary worker for this deployment
-        martingale_amount = _get_trade_amount_for_new_signal(worker_name)
+        
+        # Use enhanced Martingale system
+        martingale_amount, lane_id = _get_trade_amount_for_new_signal(worker_name)
+        
+        if martingale_amount <= 0:
+            _log(f"[{worker_name}] Trade blocked by Martingale policy - amount: ${martingale_amount}", "WARNING")
+            return
         
         # Generate unique trade ID for tracking
         _trade_sequence_number += 1
@@ -915,13 +983,22 @@ async def new_message_handler(event):
             _log(f"[{worker_name}] Starting trade {trade_tracking_id} - multiple trades allowed", "INFO")
         _active_trades_per_account[worker_name] = True
         
-        # Track this trade for Martingale result monitoring
+        # Track this trade for Enhanced Martingale system
+        if _enhanced_martingale:
+            expected_payout = martingale_amount * 1.8  # Estimate 80% payout
+            _enhanced_martingale.handle_trade_placed(
+                trade_tracking_id, worker_name, original_format_signal_data['pair'],
+                martingale_amount, lane_id, expected_payout
+            )
+        
+        # Track this trade for Martingale result monitoring (legacy support)
         _pending_trade_results[trade_tracking_id] = {
             'timestamp': time.time(),
             'amount': martingale_amount,
             'symbol': original_format_signal_data['pair'],
             'direction': original_format_signal_data['action'],
-            'worker_name': worker_name
+            'worker_name': worker_name,
+            'lane_id': lane_id  # Store lane_id for Enhanced Martingale
         }
         
         # Store trade details for when we get the real PocketOption trade ID
@@ -933,7 +1010,8 @@ async def new_message_handler(event):
             'direction': original_format_signal_data['action'],
             'amount': martingale_amount,
             'expiration_duration': original_format_signal_data['expiration'],
-            'is_martingale': is_martingale
+            'is_martingale': is_martingale,
+            'lane_id': lane_id  # Store lane_id for Enhanced Martingale
         }
         
         _place_trade_from_signal(
@@ -1248,7 +1326,9 @@ def handle_trade_result_callback(trade_id, symbol, result, profit_loss=None, wor
     _handle_trade_result(trade_id, symbol, result, profit_loss, worker_name)
 
 def get_current_martingale_status():
-    """Get current Martingale system status for debugging"""
+    """Get current status of both Enhanced and Legacy Martingale systems"""
+    global _enhanced_martingale, _martingale_enabled, _single_trade_policy_enabled, _account_martingale_states, _active_trades_per_account, _current_active_trade
+    
     total_active_trades = len([t for t in _active_trades_per_account.values() if t])
     total_queued_amounts = sum(len(state['martingale_queue']) for state in _account_martingale_states.values())
     
@@ -1261,7 +1341,7 @@ def get_current_martingale_status():
         primary_consecutive_losses = _account_martingale_states[primary_account]['consecutive_losses']
         primary_queue = _account_martingale_states[primary_account]['martingale_queue'].copy()
     
-    return {
+    status = {
         'martingale_enabled': _martingale_enabled,
         'martingale_multiplier': _martingale_multiplier,
         'single_trade_policy_enabled': _single_trade_policy_enabled,
@@ -1274,6 +1354,21 @@ def get_current_martingale_status():
         'active_trades_per_account': _active_trades_per_account.copy(),
         'current_active_trade': _current_active_trade
     }
+    
+    # Add Enhanced Martingale status if available
+    if _enhanced_martingale:
+        try:
+            enhanced_status = _enhanced_martingale.get_current_status()
+            status['enhanced_martingale'] = enhanced_status
+            status['enhanced_available'] = True
+        except Exception as e:
+            _log(f"Error getting Enhanced Martingale status: {e}", "ERROR")
+            status['enhanced_available'] = False
+            status['enhanced_error'] = str(e)
+    else:
+        status['enhanced_available'] = False
+    
+    return status
 
 def force_release_trade_locks():
     """Emergency function to release stuck trade locks"""
@@ -1297,3 +1392,53 @@ def force_release_trade_locks():
     
     _log(f"Cleared {len(cleared_trades)} pending trades: {cleared_trades}", "WARNING")
     _log("Trade locks released. Bot should now accept new signals.", "INFO")
+
+def configure_enhanced_martingale_settings(account_name: str, **settings) -> bool:
+    """Configure Enhanced Martingale settings for an account"""
+    global _enhanced_martingale
+    
+    if not _enhanced_martingale:
+        _log("Enhanced Martingale system not available", "ERROR")
+        return False
+    
+    try:
+        return _enhanced_martingale.configure_account_settings(account_name, **settings)
+    except Exception as e:
+        _log(f"Error configuring Enhanced Martingale settings: {e}", "ERROR")
+        return False
+
+def get_enhanced_martingale_statistics(account_name: str = None, days: int = 30) -> dict:
+    """Get Enhanced Martingale lane statistics"""
+    global _enhanced_martingale
+    
+    if not _enhanced_martingale:
+        return {}
+    
+    try:
+        return _enhanced_martingale.get_lane_statistics(account_name, days)
+    except Exception as e:
+        _log(f"Error getting Enhanced Martingale statistics: {e}", "ERROR")
+        return {}
+
+def force_complete_martingale_lane(lane_id: str, status: str = 'cancelled') -> bool:
+    """Manually complete/cancel a Martingale lane"""
+    global _enhanced_martingale
+    
+    if not _enhanced_martingale:
+        _log("Enhanced Martingale system not available", "ERROR")
+        return False
+    
+    try:
+        return _enhanced_martingale.force_complete_lane(lane_id, status)
+    except Exception as e:
+        _log(f"Error completing Martingale lane: {e}", "ERROR")
+        return False
+
+def configure_enhanced_concurrency(account_name: str, enabled: bool, max_lanes: int = 3, strategy: str = 'fifo') -> bool:
+    """Configure Enhanced Martingale concurrency settings"""
+    settings = {
+        'concurrent_trading_enabled': enabled,
+        'max_concurrent_lanes': max_lanes,
+        'lane_assignment_strategy': strategy
+    }
+    return configure_enhanced_martingale_settings(account_name, **settings)

@@ -19,6 +19,8 @@ except RuntimeError:
 import pocket_connector
 import detectsignal
 import worker # Import the new worker module
+from enhanced_martingale import get_enhanced_martingale_manager
+from trade_manager import initialize_trade_manager, get_trade_manager, shutdown_trade_manager
 # import tools.pocket_functions as pocket_functions # Import the new functions module
 
 # Database imports
@@ -88,7 +90,7 @@ worker_manager = None # Will be an instance of PocketWorkerManager
 min_payout = 1
 period = 60
 expiration = 60
-single_trade_policy = True
+# single_trade_policy = True  # Now determined dynamically based on enhanced Martingale settings
 
 # All functions like get_payout, get_df, buy, buy2, make_df, strategie, etc.,
 # are now moved to pocket_functions.py
@@ -216,7 +218,8 @@ class PocketWorkerManager:
             return {'status': 'error', 'message': f'Worker {account_name} not alive.'}
 
         request_id = str(uuid.uuid4())
-        command = {'request_id': request_id, 'action': action, 'params': params or {}}
+        command_timestamp = time.time()  # Add timestamp for command age validation
+        command = {'request_id': request_id, 'action': action, 'params': params or {}, 'timestamp': command_timestamp}
         
         try:
             worker_info['cmd_q'].put(command)
@@ -327,7 +330,45 @@ def main():
 
     # --- Define functions to be used by detectsignal ---
     def place_trade_via_worker_manager(amount, pair, action, expiration_duration, target_po_account_name=None, tracking_id=None):
-        """Places a trade using a specified (or default) PO worker."""
+        """Places a trade using the enhanced trade manager for immediate execution and monitoring."""
+        # Get the trade manager instance
+        trade_manager = get_trade_manager()
+        if not trade_manager:
+            global_value.logger("[BotMain] Trade Manager not initialized. Falling back to direct worker communication.", "WARNING")
+            return _place_trade_legacy(amount, pair, action, expiration_duration, target_po_account_name, tracking_id)
+        
+        # Ensure amount is a float, not Decimal for JSON serialization
+        amount = float(amount) if hasattr(amount, '__float__') else amount
+        
+        # Determine target account
+        target_account = target_po_account_name or 'ALL_ENABLED_WORKERS'
+        
+        # Prepare signal data for trade manager
+        signal_data = {
+            'amount': amount,
+            'pair': pair,
+            'action': action,
+            'expiration': expiration_duration,
+            'target_account': target_account
+        }
+        
+        # Schedule trade for immediate execution
+        start_time = time.time()
+        trade_tracking_id = trade_manager.schedule_trade(signal_data, tracking_id)
+        execution_time = time.time() - start_time
+        
+        global_value.logger(f"[BotMain] Trade scheduled via TradeManager: {pair} {action} ${amount} (Tracking: {trade_tracking_id}, Scheduled in: {execution_time:.3f}s)", "INFO")
+        
+        # Return success response
+        return {
+            'status': 'success',
+            'tracking_id': trade_tracking_id,
+            'execution_time': execution_time,
+            'message': f'Trade scheduled for immediate execution via TradeManager'
+        }
+    
+    def _place_trade_legacy(amount, pair, action, expiration_duration, target_po_account_name=None, tracking_id=None):
+        """Legacy trade placement function (fallback when TradeManager is not available)"""
         # Ensure amount is a float, not Decimal for JSON serialization
         amount = float(amount) if hasattr(amount, '__float__') else amount
         trade_params = {'amount': amount, 'pair': pair, 'action': action, 'expiration_duration': expiration_duration}
@@ -459,7 +500,21 @@ def main():
     detectsignal.initialize_martingale_system_from_database()
     global_value.logger(f"[BotMain] Martingale system initialized with per-account settings from database", "INFO")
     
-    # Configure single trade policy
+    # Initialize the enhanced trade manager for immediate execution and centralized monitoring
+    trade_manager = initialize_trade_manager(worker_manager, db, global_value.logger)
+    global_value.logger("[BotMain] Enhanced Trade Manager initialized for immediate trade execution and monitoring", "INFO")
+    
+    # Configure single trade policy based on enhanced Martingale settings
+    enhanced_manager = get_enhanced_martingale_manager()
+    if enhanced_manager and enhanced_manager.should_disable_single_trade_policy():
+        # At least one account has concurrent trading enabled - disable single trade policy
+        single_trade_policy = False
+        global_value.logger("[BotMain] Concurrent trading enabled for at least one account - disabling single trade policy", "INFO")
+    else:
+        # No accounts have concurrent trading enabled - use single trade policy
+        single_trade_policy = True
+        global_value.logger("[BotMain] No concurrent trading enabled - using single trade policy", "INFO")
+    
     detectsignal.configure_single_trade_policy(single_trade_policy)
     policy_status = "ENABLED" if single_trade_policy else "DISABLED"
     global_value.logger(f"[BotMain] Single trade policy: {policy_status}", "INFO")
@@ -481,51 +536,106 @@ def main():
                 martingale_status = detectsignal.get_current_martingale_status()
                 single_trade_policy_status = "ENABLED" if martingale_status.get('single_trade_policy_enabled', True) else "DISABLED"
                 status_msg = f"[BotMain] Trading Status - Single Trade Policy: {single_trade_policy_status}, Martingale: "
+                
                 if martingale_status['martingale_enabled']:
                     status_msg += f"ENABLED, "
                     status_msg += f"Total Active Trades: {martingale_status['active_trades_count']}, "
                     status_msg += f"Current Active Trade: {martingale_status['current_active_trade']}"
                     
-                    # Show per-account status for ENABLED accounts only
-                    account_states = martingale_status.get('account_states', {})
-                    active_trades_per_account = martingale_status.get('active_trades_per_account', {})
-                    
-                    # Get enabled accounts from database
-                    enabled_accounts = db.get_enabled_accounts()
-                    enabled_account_names = [acc['worker_name'] for acc in enabled_accounts]
-                    
-                    if account_states and enabled_account_names:
-                        status_msg += " | Enabled Account Status: "
-                        account_info = []
-                        for account in enabled_account_names:
-                            if account in account_states:
-                                state = account_states[account]
-                                consecutive_losses = state['consecutive_losses']
-                                queue_length = len(state['martingale_queue'])
-                                active_trade = active_trades_per_account.get(account, None)
-                                
-                                # Get account-specific settings from database
-                                account_data = next((acc for acc in enabled_accounts if acc['worker_name'] == account), None)
-                                if account_data:
-                                    base_amount = account_data['base_amount']
-                                    multiplier = account_data['martingale_multiplier']
-                                    account_martingale_enabled = account_data['martingale_enabled']
+                    # Show Enhanced Martingale status if available
+                    if martingale_status.get('enhanced_available', False):
+                        enhanced_status = martingale_status.get('enhanced_martingale', {})
+                        enhanced_accounts = enhanced_status.get('accounts', {})
+                        
+                        status_msg += " | Enhanced Martingale: ACTIVE"
+                        total_lanes = sum(acc.get('active_lanes_count', 0) for acc in enhanced_accounts.values())
+                        if total_lanes > 0:
+                            status_msg += f", Active Lanes: {total_lanes}"
+                        
+                        # Show per-account Enhanced status
+                        enabled_accounts = db.get_enabled_accounts()
+                        enabled_account_names = [acc['worker_name'] for acc in enabled_accounts]
+                        
+                        if enhanced_accounts and enabled_account_names:
+                            status_msg += " | Enhanced Account Status: "
+                            account_info = []
+                            for account in enabled_account_names:
+                                if account in enhanced_accounts:
+                                    acc_status = enhanced_accounts[account]
+                                    lane_count = acc_status.get('active_lanes_count', 0)
+                                    concurrent_enabled = "✓" if acc_status.get('concurrent_trading_enabled', False) else "✗"
+                                    max_lanes = acc_status.get('max_concurrent_lanes', 3)
                                     
-                                    account_status = f"{account}(Base:${base_amount}, Mult:{multiplier}x, Mart:{'On' if account_martingale_enabled else 'Off'}, Losses:{consecutive_losses}, Queue:{queue_length}"
-                                    if active_trade:
-                                        account_status += f", Active:{active_trade}"
+                                    account_status = f"{account}(Concurrent:{concurrent_enabled}, Lanes:{lane_count}/{max_lanes}"
+                                    
+                                    # Show active lanes details
+                                    active_lanes = acc_status.get('active_lanes', [])
+                                    if active_lanes:
+                                        lane_details = []
+                                        for lane in active_lanes[:2]:  # Show up to 2 lanes
+                                            lane_details.append(f"{lane['symbol']}:L{lane['current_level']}:${lane['current_amount']}")
+                                        if len(active_lanes) > 2:
+                                            lane_details.append(f"+{len(active_lanes)-2}more")
+                                        account_status += f", [{','.join(lane_details)}]"
+                                    
                                     account_status += ")"
                                     account_info.append(account_status)
+                            
+                            status_msg += ", ".join(account_info)
+                    else:
+                        # Fallback to legacy status
+                        status_msg += " | Legacy Mode: "
+                        account_states = martingale_status.get('account_states', {})
+                        active_trades_per_account = martingale_status.get('active_trades_per_account', {})
                         
-                        status_msg += ", ".join(account_info)
+                        # Get enabled accounts from database
+                        enabled_accounts = db.get_enabled_accounts()
+                        enabled_account_names = [acc['worker_name'] for acc in enabled_accounts]
+                        
+                        if account_states and enabled_account_names:
+                            account_info = []
+                            for account in enabled_account_names:
+                                if account in account_states:
+                                    state = account_states[account]
+                                    consecutive_losses = state['consecutive_losses']
+                                    queue_length = len(state['martingale_queue'])
+                                    active_trade = active_trades_per_account.get(account, None)
+                                    
+                                    # Get account-specific settings from database
+                                    account_data = next((acc for acc in enabled_accounts if acc['worker_name'] == account), None)
+                                    if account_data:
+                                        base_amount = account_data['base_amount']
+                                        multiplier = account_data['martingale_multiplier']
+                                        account_martingale_enabled = account_data['martingale_enabled']
+                                        
+                                        account_status = f"{account}(Base:${base_amount}, Mult:{multiplier}x, Mart:{'On' if account_martingale_enabled else 'Off'}, Losses:{consecutive_losses}, Queue:{queue_length}"
+                                        if active_trade:
+                                            account_status += f", Active:{active_trade}"
+                                        account_status += ")"
+                                        account_info.append(account_status)
+                            
+                            status_msg += ", ".join(account_info)
                 else:
                     status_msg += "DISABLED"
+                
+                # Add Trade Manager statistics
+                trade_manager = get_trade_manager()
+                if trade_manager:
+                    tm_stats = trade_manager.get_statistics()
+                    status_msg += f" | TradeManager: Active:{tm_stats['active_trades_count']}, "
+                    status_msg += f"Placed:{tm_stats['total_trades_placed']}, "
+                    status_msg += f"Completed:{tm_stats['total_trades_completed']}, "
+                    status_msg += f"AvgExec:{tm_stats['average_execution_time']:.3f}s, "
+                    status_msg += f"Success:{tm_stats['success_rate']:.1f}%"
                 
                 global_value.logger(status_msg, "INFO")
                 last_martingale_status_check = current_time
     except KeyboardInterrupt:
         global_value.logger("[BotMain] KeyboardInterrupt received. Shutting down...", "INFO")
     finally:
+        # Shutdown trade manager
+        shutdown_trade_manager()
+        
         if worker_manager:
             worker_manager.shutdown_all()
         # Perform any cleanup if necessary.

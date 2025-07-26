@@ -138,8 +138,19 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
             action = command.get('action')
             params = command.get('params', {})
             request_id = command.get('request_id', 'unknown_request')
+            command_timestamp = command.get('timestamp', time.time())  # Default to current time if not present
 
-            worker_log(worker_name, f"Received command - Action: '{action}' (type: {type(action)}), Params: {params}, Request ID: {request_id}", "DEBUG")
+            # Check if command is too old (stale) - especially important for trading commands
+            command_age = time.time() - command_timestamp
+            max_command_age = 60  # Maximum age in seconds before considering command stale
+            
+            if action == 'buy' and command_age > max_command_age:
+                worker_log(worker_name, f"DISCARDING stale trade command (age: {command_age:.1f}s > {max_command_age}s) - Request ID: {request_id}", "WARNING")
+                response_queue.put({'request_id': request_id, 'status': 'error', 
+                                    'message': f'Command too old ({command_age:.1f}s), discarded to prevent late execution'})
+                continue  # Skip processing this stale command
+
+            worker_log(worker_name, f"Received command - Action: '{action}' (type: {type(action)}), Params: {params}, Request ID: {request_id}, Age: {command_age:.1f}s", "DEBUG")
 
             # Ensure connection health before processing command
             if not check_connection_health():

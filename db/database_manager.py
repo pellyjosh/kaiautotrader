@@ -329,17 +329,98 @@ class DatabaseManager:
         )
         """
         
+        # Enhanced Martingale lanes table for smart concurrent trading
+        martingale_lanes_table = """
+        CREATE TABLE IF NOT EXISTS martingale_lanes (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            lane_id VARCHAR(100) UNIQUE NOT NULL,
+            account_name VARCHAR(100) NOT NULL,
+            symbol VARCHAR(50) NOT NULL,
+            status ENUM('active', 'completed', 'cancelled') DEFAULT 'active',
+            current_level INTEGER DEFAULT 1,
+            base_amount DECIMAL(10,2) NOT NULL,
+            current_amount DECIMAL(10,2) NOT NULL,
+            multiplier DECIMAL(5,2) NOT NULL,
+            max_level INTEGER DEFAULT 7,
+            total_invested DECIMAL(10,2) DEFAULT 0.00,
+            total_potential_payout DECIMAL(10,2) DEFAULT 0.00,
+            trade_ids TEXT DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP NULL,
+            FOREIGN KEY (account_name) REFERENCES accounts(worker_name) ON DELETE CASCADE,
+            INDEX idx_account_status (account_name, status),
+            INDEX idx_lane_status (lane_id, status)
+        )
+        """ if self.db_type == "mysql" else """
+        CREATE TABLE IF NOT EXISTS martingale_lanes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane_id TEXT UNIQUE NOT NULL,
+            account_name TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+            current_level INTEGER DEFAULT 1,
+            base_amount REAL NOT NULL,
+            current_amount REAL NOT NULL,
+            multiplier REAL NOT NULL,
+            max_level INTEGER DEFAULT 7,
+            total_invested REAL DEFAULT 0.00,
+            total_potential_payout REAL DEFAULT 0.00,
+            trade_ids TEXT DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP NULL,
+            FOREIGN KEY (account_name) REFERENCES accounts(worker_name) ON DELETE CASCADE
+        )
+        """
+
+        # Trading settings table for concurrency control and other settings
+        trading_settings_table = """
+        CREATE TABLE IF NOT EXISTS trading_settings (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            account_name VARCHAR(100) UNIQUE NOT NULL,
+            concurrent_trading_enabled BOOLEAN DEFAULT FALSE,
+            max_concurrent_lanes INTEGER DEFAULT 3,
+            lane_assignment_strategy ENUM('fifo', 'round_robin', 'symbol_priority') DEFAULT 'fifo',
+            auto_create_lanes BOOLEAN DEFAULT TRUE,
+            cool_down_seconds INTEGER DEFAULT 0,
+            max_daily_lanes INTEGER DEFAULT 10,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (account_name) REFERENCES accounts(worker_name) ON DELETE CASCADE
+        )
+        """ if self.db_type == "mysql" else """
+        CREATE TABLE IF NOT EXISTS trading_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_name TEXT UNIQUE NOT NULL,
+            concurrent_trading_enabled BOOLEAN DEFAULT 0,
+            max_concurrent_lanes INTEGER DEFAULT 3,
+            lane_assignment_strategy TEXT DEFAULT 'fifo' CHECK (lane_assignment_strategy IN ('fifo', 'round_robin', 'symbol_priority')),
+            auto_create_lanes BOOLEAN DEFAULT 1,
+            cool_down_seconds INTEGER DEFAULT 0,
+            max_daily_lanes INTEGER DEFAULT 10,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (account_name) REFERENCES accounts(worker_name) ON DELETE CASCADE
+        )
+        """
+
         # Execute table creation
         self._execute_query(accounts_table)
         self._execute_query(trades_table)
         self._execute_query(martingale_state_table)
         self._execute_query(performance_table)
+        self._execute_query(martingale_lanes_table)
+        self._execute_query(trading_settings_table)
         
         # Check and migrate existing schema if needed
         self._check_and_migrate_schema()
         
         # Initialize Martingale state if not exists
         self._initialize_martingale_state()
+        
+        # Initialize default trading settings for existing accounts
+        self._initialize_trading_settings()
         
         self.logger.info("Database tables created successfully")
     
@@ -348,6 +429,46 @@ class DatabaseManager:
         # No longer creating a global state since we use per-account states
         # Account-specific states will be initialized when accounts are first used
         self.logger.info("Martingale state table ready for per-account states")
+    
+    def _initialize_trading_settings(self):
+        """Initialize default trading settings for all existing accounts"""
+        try:
+            # Get all accounts
+            accounts = self.get_all_accounts()
+            
+            for account in accounts:
+                account_name = account['worker_name']
+                
+                # Check if trading settings already exist
+                query = "SELECT id FROM trading_settings WHERE account_name = ?" if self.db_type == "sqlite" else "SELECT id FROM trading_settings WHERE account_name = %s"
+                existing = self._execute_query(query, (account_name,), fetch="one")
+                
+                if not existing:
+                    # Create default trading settings
+                    if self.db_type == "mysql":
+                        insert_query = """
+                        INSERT INTO trading_settings (account_name, concurrent_trading_enabled, max_concurrent_lanes, 
+                                                    lane_assignment_strategy, auto_create_lanes, cool_down_seconds, max_daily_lanes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """
+                    else:
+                        insert_query = """
+                        INSERT INTO trading_settings (account_name, concurrent_trading_enabled, max_concurrent_lanes, 
+                                                    lane_assignment_strategy, auto_create_lanes, cool_down_seconds, max_daily_lanes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """
+                    
+                    # Default settings: concurrent trading disabled, conservative settings
+                    default_params = (account_name, False, 3, 'fifo', True, 0, 10)
+                    self._execute_query(insert_query, default_params)
+                    self.logger.info(f"Initialized default trading settings for account: {account_name}")
+            
+            if self.db_type == "mysql":
+                self.connection.commit()
+                
+        except Exception as e:
+            self.logger.error(f"Failed to initialize trading settings: {e}")
+    
     
     def _check_and_migrate_schema(self):
         """Check if schema needs migration and apply updates"""
@@ -1229,6 +1350,320 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Failed to get performance summary: {e}")
             return []
+    
+    # === ENHANCED MARTINGALE LANES METHODS ===
+    
+    def create_martingale_lane(self, account_name: str, symbol: str, base_amount: float, multiplier: float = 2.5, max_level: int = 7) -> str:
+        """Create a new Martingale lane and return its lane_id"""
+        try:
+            import uuid
+            lane_id = f"{account_name}_{symbol}_{int(time.time())}_{str(uuid.uuid4())[:8]}"
+            
+            if self.db_type == "mysql":
+                query = """
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, base_amount, current_amount, multiplier, max_level)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """
+            else:
+                query = """
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, base_amount, current_amount, multiplier, max_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+            
+            params = (lane_id, account_name, symbol, base_amount, base_amount, multiplier, max_level)
+            self._execute_query(query, params)
+            
+            if self.db_type == "mysql":
+                self.connection.commit()
+            
+            self.logger.info(f"Created Martingale lane {lane_id} for {account_name} - {symbol}")
+            return lane_id
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create Martingale lane: {e}")
+            return None
+    
+    def get_active_martingale_lanes(self, account_name: str = None, symbol: str = None) -> List[Dict]:
+        """Get active Martingale lanes, optionally filtered by account or symbol"""
+        try:
+            base_query = "SELECT * FROM martingale_lanes WHERE status = 'active'"
+            params = []
+            
+            if account_name:
+                base_query += " AND account_name = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(account_name)
+            
+            if symbol:
+                base_query += " AND symbol = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(symbol)
+            
+            base_query += " ORDER BY created_at ASC"  # FIFO ordering
+            
+            results = self._execute_query(base_query, tuple(params), fetch="all")
+            
+            lanes = []
+            for row in results:
+                lane = {
+                    'lane_id': row[1],
+                    'account_name': row[2], 
+                    'symbol': row[3],
+                    'status': row[4],
+                    'current_level': row[5],
+                    'base_amount': float(row[6]),
+                    'current_amount': float(row[7]),
+                    'multiplier': float(row[8]),
+                    'max_level': row[9],
+                    'total_invested': float(row[10]),
+                    'total_potential_payout': float(row[11]),
+                    'trade_ids': json.loads(row[12]) if row[12] else [],
+                    'created_at': row[13],
+                    'updated_at': row[14],
+                    'completed_at': row[15]
+                }
+                lanes.append(lane)
+            
+            return lanes
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get active Martingale lanes: {e}")
+            return []
+    
+    def get_next_lane_for_assignment(self, account_name: str, symbol: str = None) -> Dict:
+        """Get the next Martingale lane for trade assignment based on strategy"""
+        try:
+            # Get trading settings for this account
+            settings = self.get_trading_settings(account_name)
+            strategy = settings.get('lane_assignment_strategy', 'round_robin')
+            
+            if strategy == 'symbol_priority':
+                # For symbol_priority, first try to get lanes with matching symbol
+                if symbol:
+                    symbol_lanes = self.get_active_martingale_lanes(account_name, symbol)
+                    if symbol_lanes:
+                        return symbol_lanes[0]  # Return oldest matching symbol lane
+                # Fallback to all lanes if no matching symbol
+                lanes = self.get_active_martingale_lanes(account_name, None)
+            else:
+                # For fifo and round_robin, get ALL active lanes (no symbol filter)
+                lanes = self.get_active_martingale_lanes(account_name, None)
+            
+            if not lanes:
+                return None
+            
+            if strategy == 'fifo':
+                # Return oldest lane first (already sorted by created_at ASC)
+                return lanes[0]
+            elif strategy == 'round_robin':
+                # Find lane with least trades for balanced assignment
+                return min(lanes, key=lambda x: len(x['trade_ids']))
+            elif strategy == 'symbol_priority':
+                # Fallback to FIFO if no matching symbol found
+                return lanes[0]
+            else:
+                return lanes[0]  # Default to FIFO
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get next lane for assignment: {e}")
+            return None
+    
+    def update_martingale_lane_on_trade(self, lane_id: str, trade_id: str, trade_amount: float, expected_payout: float = 0.0) -> bool:
+        """Update Martingale lane when a trade is placed"""
+        try:
+            # Get current lane data
+            query = "SELECT trade_ids, total_invested, total_potential_payout, current_level, base_amount, multiplier FROM martingale_lanes WHERE lane_id = " + ("%s" if self.db_type == "mysql" else "?")
+            result = self._execute_query(query, (lane_id,), fetch="one")
+            
+            if not result:
+                self.logger.error(f"Martingale lane {lane_id} not found")
+                return False
+            
+            trade_ids_json, total_invested, total_potential_payout, current_level, base_amount, multiplier = result
+            trade_ids = json.loads(trade_ids_json) if trade_ids_json else []
+            
+            # Add new trade
+            trade_ids.append(trade_id)
+            new_total_invested = float(total_invested) + trade_amount
+            new_total_potential_payout = float(total_potential_payout) + expected_payout
+            
+            # Calculate next level amount for future use
+            next_level = current_level + 1
+            next_amount = float(base_amount) * (float(multiplier) ** (next_level - 1))
+            
+            # Update the lane
+            if self.db_type == "mysql":
+                update_query = """
+                UPDATE martingale_lanes 
+                SET trade_ids = %s, total_invested = %s, total_potential_payout = %s, 
+                    current_level = %s, current_amount = %s, updated_at = NOW()
+                WHERE lane_id = %s
+                """
+            else:
+                update_query = """
+                UPDATE martingale_lanes 
+                SET trade_ids = ?, total_invested = ?, total_potential_payout = ?, 
+                    current_level = ?, current_amount = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE lane_id = ?
+                """
+            
+            params = (json.dumps(trade_ids), new_total_invested, new_total_potential_payout, 
+                     next_level, next_amount, lane_id)
+            self._execute_query(update_query, params)
+            
+            if self.db_type == "mysql":
+                self.connection.commit()
+            
+            self.logger.info(f"Updated Martingale lane {lane_id} with trade {trade_id} - Level {current_level}, Amount ${trade_amount}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update Martingale lane: {e}")
+            return False
+    
+    def complete_martingale_lane(self, lane_id: str, status: str = 'completed') -> bool:
+        """Mark a Martingale lane as completed or cancelled"""
+        try:
+            if self.db_type == "mysql":
+                query = "UPDATE martingale_lanes SET status = %s, completed_at = NOW(), updated_at = NOW() WHERE lane_id = %s"
+            else:
+                query = "UPDATE martingale_lanes SET status = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE lane_id = ?"
+            
+            self._execute_query(query, (status, lane_id))
+            
+            if self.db_type == "mysql":
+                self.connection.commit()
+            
+            self.logger.info(f"Completed Martingale lane {lane_id} with status: {status}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to complete Martingale lane: {e}")
+            return False
+    
+    def get_trading_settings(self, account_name: str) -> Dict:
+        """Get trading settings for an account"""
+        try:
+            query = "SELECT * FROM trading_settings WHERE account_name = " + ("%s" if self.db_type == "mysql" else "?")
+            result = self._execute_query(query, (account_name,), fetch="one")
+            
+            if result:
+                return {
+                    'account_name': result[1],
+                    'concurrent_trading_enabled': bool(result[2]),
+                    'max_concurrent_lanes': result[3],
+                    'lane_assignment_strategy': result[4],
+                    'auto_create_lanes': bool(result[5]),
+                    'cool_down_seconds': result[6],
+                    'max_daily_lanes': result[7],
+                    'created_at': result[8],
+                    'updated_at': result[9]
+                }
+            else:
+                # Return default settings if not found
+                return {
+                    'account_name': account_name,
+                    'concurrent_trading_enabled': True,  # Enable concurrent trading by default
+                    'max_concurrent_lanes': 5,
+                    'lane_assignment_strategy': 'round_robin',  # Use round_robin as default
+                    'auto_create_lanes': True,
+                    'cool_down_seconds': 0,
+                    'max_daily_lanes': 10
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get trading settings: {e}")
+            return {
+                'account_name': account_name,
+                'concurrent_trading_enabled': True,  # Enable concurrent trading by default
+                'max_concurrent_lanes': 5,
+                'lane_assignment_strategy': 'round_robin',  # Use round_robin as default
+                'auto_create_lanes': True,
+                'cool_down_seconds': 0,
+                'max_daily_lanes': 10
+            }
+    
+    def update_trading_settings(self, account_name: str, **settings) -> bool:
+        """Update trading settings for an account"""
+        try:
+            # Build dynamic query based on provided settings
+            valid_fields = [
+                'concurrent_trading_enabled', 'max_concurrent_lanes', 'lane_assignment_strategy',
+                'auto_create_lanes', 'cool_down_seconds', 'max_daily_lanes'
+            ]
+            
+            updates = []
+            params = []
+            
+            for field, value in settings.items():
+                if field in valid_fields:
+                    updates.append(f"{field} = " + ("%s" if self.db_type == "mysql" else "?"))
+                    params.append(value)
+            
+            if not updates:
+                return True  # Nothing to update
+            
+            if self.db_type == "mysql":
+                query = f"UPDATE trading_settings SET {', '.join(updates)}, updated_at = NOW() WHERE account_name = %s"
+            else:
+                query = f"UPDATE trading_settings SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE account_name = ?"
+            
+            params.append(account_name)
+            
+            self._execute_query(query, tuple(params))
+            
+            if self.db_type == "mysql":
+                self.connection.commit()
+            
+            self.logger.info(f"Updated trading settings for {account_name}: {settings}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update trading settings: {e}")
+            return False
+    
+    def get_lane_statistics(self, account_name: str = None, days: int = 30) -> Dict:
+        """Get Martingale lane statistics"""
+        try:
+            base_query = """
+            SELECT 
+                COUNT(*) as total_lanes,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_lanes,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_lanes,
+                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_lanes,
+                AVG(current_level) as avg_level,
+                MAX(current_level) as max_level,
+                SUM(total_invested) as total_invested,
+                SUM(total_potential_payout) as total_potential_payout
+            FROM martingale_lanes 
+            WHERE created_at >= """ + ("DATE_SUB(NOW(), INTERVAL %s DAY)" if self.db_type == "mysql" else "date('now', '-' || ? || ' days')")
+            
+            params = [days]
+            
+            if account_name:
+                base_query += " AND account_name = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(account_name)
+            
+            result = self._execute_query(base_query, tuple(params), fetch="one")
+            
+            if result:
+                return {
+                    'total_lanes': result[0] or 0,
+                    'completed_lanes': result[1] or 0,
+                    'active_lanes': result[2] or 0,
+                    'cancelled_lanes': result[3] or 0,
+                    'avg_level': float(result[4]) if result[4] else 0.0,
+                    'max_level': result[5] or 0,
+                    'total_invested': float(result[6]) if result[6] else 0.0,
+                    'total_potential_payout': float(result[7]) if result[7] else 0.0
+                }
+            else:
+                return {
+                    'total_lanes': 0, 'completed_lanes': 0, 'active_lanes': 0, 'cancelled_lanes': 0,
+                    'avg_level': 0.0, 'max_level': 0, 'total_invested': 0.0, 'total_potential_payout': 0.0
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get lane statistics: {e}")
+            return {}
     
     # === UTILITY METHODS ===
     
