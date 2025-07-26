@@ -1,0 +1,17 @@
+[Unit]
+Description=Test Multiprocessing
+After=network.target
+
+[Service]
+Type=simple
+User=hubolux
+Group=hubolux
+WorkingDirectory=/opt/HuboluxAutoTrader
+Environment=PATH=/opt/HuboluxAutoTrader/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/home/hubolux
+ExecStart=/opt/HuboluxAutoTrader/venv/bin/python3 /opt/HuboluxAutoTrader/test_process_start.py
+StandardOutput=append:/opt/HuboluxAutoTrader/logs/test.log
+StandardError=append:/opt/HuboluxAutoTrader/logs/test.log
+
+[Install]
+WantedBy=multi-user.target

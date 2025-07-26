@@ -1,0 +1,36 @@
+# Telegram session files - contain sensitive authentication data
+telegram_sessions/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+
+# Database files
+# *.db
+# *.sqlite3
+
+# Log files
+logs/
+*.log
+
+# Configuration files with sensitive data
+*config.py
+!*config_template.py
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
