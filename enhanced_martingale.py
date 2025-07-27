@@ -73,7 +73,8 @@ class EnhancedMartingaleManager:
         self.lock = threading.RLock()  # For thread-safe operations
         
         # Cache for active lanes (reduces DB queries)
-        self._active_lanes_cache = {}
+        self._all_lanes_cache = {}
+        self._avaliable_lanes_cache = {}
         self._cache_last_updated = 0
         self._cache_ttl = 30  # Cache expires after 30 seconds
         
@@ -111,26 +112,45 @@ class EnhancedMartingaleManager:
     def _invalidate_cache(self):
         """Invalidate the active lanes cache"""
         with self.lock:
-            self._active_lanes_cache.clear()
+            self._all_lanes_cache.clear()
+            self._avaliable_lanes_cache.clear()
             self._cache_last_updated = 0
     
-    def _get_cached_active_lanes(self, account_name: str) -> List[Dict]:
+    def _get_avaliable_lanes(self, account_name: str) -> List[Dict]:
         """Get active lanes from cache or database"""
         with self.lock:
             current_time = time.time()
             
             if (current_time - self._cache_last_updated > self._cache_ttl or 
-                account_name not in self._active_lanes_cache):
+                account_name not in self._avaliable_lanes_cache):
                 
                 # Refresh cache
                 if self.db_manager:
-                    lanes = self.db_manager.get_active_martingale_lanes(account_name)
-                    self._active_lanes_cache[account_name] = lanes
+                    lanes = self.db_manager.get_inactive_martingale_lanes(account_name)
+                    self._avaliable_lanes_cache[account_name] = lanes
                     self._cache_last_updated = current_time
                 else:
                     return []
             
-            return self._active_lanes_cache.get(account_name, [])
+            return self._avaliable_lanes_cache.get(account_name, [])
+        
+    def _get_all_lanes(self, account_name: str) -> List[Dict]:
+        """Get active lanes from cache or database"""
+        with self.lock:
+            current_time = time.time()
+            
+            if (current_time - self._cache_last_updated > self._cache_ttl or 
+                account_name not in self._all_lanes_cache):
+                
+                # Refresh cache
+                if self.db_manager:
+                    lanes = self.db_manager.get_all_martingale_lanes(account_name)
+                    self._all_lanes_cache[account_name] = lanes
+                    self._cache_last_updated = current_time
+                else:
+                    return []
+            
+            return self._all_lanes_cache.get(account_name, [])
     
     def is_concurrent_trading_enabled(self, account_name: str) -> bool:
         """Check if concurrent trading is enabled for an account"""
@@ -178,8 +198,9 @@ class EnhancedMartingaleManager:
             return not self.active_trades_per_account.get(account_name, False)
         
         # Concurrent trading enabled - check if we can assign to existing lanes first
-        active_lanes = self._get_cached_active_lanes(account_name)
-        if active_lanes:
+        lanes = self._get_all_lanes(account_name)
+        avaliable_lane = self._get_avaliable_lanes(account_name)
+        if avaliable_lane:
             # If we have existing lanes, we can always assign trades to them (round-robin/fifo)
             return True
         
@@ -187,7 +208,7 @@ class EnhancedMartingaleManager:
         settings = self.db_manager.get_trading_settings(account_name) if self.db_manager else {}
         max_lanes = settings.get('max_concurrent_lanes', 5)
         
-        return len(active_lanes) < max_lanes
+        return len(lanes) < max_lanes
     
     def get_trade_amount_for_signal(self, account_name: str, symbol: str) -> Tuple[float, Optional[str]]:
         """
@@ -235,7 +256,7 @@ class EnhancedMartingaleManager:
             trade_count = len(lane['trade_ids'])
             self._log(f"[{account_name}] Lane assignment using {strategy} strategy: Lane {lane['lane_id']} ({lane['symbol']}) with {trade_count} trades", "DEBUG")
         else:
-            self._log(f"[{account_name}] No active lanes found for assignment", "DEBUG")
+            self._log(f"[{account_name}] No avaliable lanes found for assignment", "DEBUG")
         
         return lane
     
@@ -332,7 +353,7 @@ class EnhancedMartingaleManager:
         """Handle a winning trade - complete lane if applicable"""
         if lane_id and self.db_manager:
             # Complete the lane
-            success = self.db_manager.complete_martingale_lane(lane_id, 'completed')
+            success = self.db_manager.complete_martingale_lane(lane_id)
             if success:
                 self._invalidate_cache()
                 self._log(f"[{account_name}] Lane {lane_id} completed with WIN - ${profit} profit", "INFO")
@@ -359,11 +380,12 @@ class EnhancedMartingaleManager:
                 
                 if current_lane and current_lane['current_level'] >= current_lane['max_level']:
                     # Lane has reached max level - mark as completed
-                    self.db_manager.complete_martingale_lane(lane_id, 'completed')
+                    self.db_manager.complete_martingale_lane(lane_id)
                     self._invalidate_cache()
                     self._log(f"[{account_name}] Lane {lane_id} reached max level - completed", "WARNING")
                 else:
-                    self._log(f"[{account_name}] Lane {lane_id} continues after loss", "INFO")
+                    self.db_manager.update_martingale_lane_status(lane_id, 'inactive')
+                    self._log(f"[{account_name}] Lane {lane_id} Updated matingale Status", "INFO")
                 
                 return True
         else:
@@ -426,7 +448,7 @@ class EnhancedMartingaleManager:
             }
             
             for account_name in account_names:
-                active_lanes = self._get_cached_active_lanes(account_name)
+                active_lanes = self._get_all_lanes(account_name)
                 trading_settings = self.db_manager.get_trading_settings(account_name)
                 
                 status['accounts'][account_name] = {
@@ -434,7 +456,7 @@ class EnhancedMartingaleManager:
                     'active_trade': self.active_trades_per_account.get(account_name, False),
                     'concurrent_trading_enabled': trading_settings.get('concurrent_trading_enabled', False),
                     'max_concurrent_lanes': trading_settings.get('max_concurrent_lanes', 3),
-                    'active_lanes': [
+                    'lanes': [
                         {
                             'lane_id': lane['lane_id'],
                             'symbol': lane['symbol'],
@@ -467,16 +489,16 @@ class EnhancedMartingaleManager:
             self._log(f"Failed to configure account settings: {e}", "ERROR")
             return False
     
-    def force_complete_lane(self, lane_id: str, status: str = 'cancelled') -> bool:
+    def force_complete_lane(self, lane_id: str) -> bool:
         """Manually complete/cancel a Martingale lane"""
         if not self.db_manager:
             return False
         
         try:
-            success = self.db_manager.complete_martingale_lane(lane_id, status)
+            success = self.db_manager.complete_martingale_lane(lane_id)
             if success:
                 self._invalidate_cache()
-                self._log(f"Manually completed lane {lane_id} with status: {status}", "INFO")
+                self._log(f"Manually completed lane {lane_id}", "INFO")
             return success
         except Exception as e:
             self._log(f"Failed to complete lane: {e}", "ERROR")

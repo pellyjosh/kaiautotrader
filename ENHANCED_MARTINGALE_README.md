@@ -195,7 +195,7 @@ detectsignal.configure_enhanced_martingale_settings('pelly_demo',
 stats = detectsignal.get_enhanced_martingale_statistics('pelly_demo', days=7)
 
 # Force complete lanes
-detectsignal.force_complete_martingale_lane('lane_id_here', 'cancelled')
+detectsignal.force_complete_martingale_lane('lane_id_here')
 ```
 
 ## Best Practices

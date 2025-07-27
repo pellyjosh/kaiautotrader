@@ -329,8 +329,8 @@ def _handle_trade_result(trade_id, symbol, result, profit_loss=None, worker_name
         worker_name = 'pelly_demo'  # Default fallback
     
     # Update database with trade result
-    payout = float(profit_loss) if profit_loss and result == "win" else 0.0
-    _update_trade_result_in_database(trade_id, result, payout)
+    # payout = float(profit_loss) if profit_loss and result == "win" else 0.0
+    _update_trade_result_in_database(trade_id, result, profit_loss)
     
     # Clear the active trade lock if single trade policy is enabled
     if _single_trade_policy_enabled and _current_active_trade == trade_id:
@@ -1420,7 +1420,7 @@ def get_enhanced_martingale_statistics(account_name: str = None, days: int = 30)
         _log(f"Error getting Enhanced Martingale statistics: {e}", "ERROR")
         return {}
 
-def force_complete_martingale_lane(lane_id: str, status: str = 'cancelled') -> bool:
+def force_complete_martingale_lane(lane_id: str) -> bool:
     """Manually complete/cancel a Martingale lane"""
     global _enhanced_martingale
     
@@ -1429,7 +1429,7 @@ def force_complete_martingale_lane(lane_id: str, status: str = 'cancelled') -> b
         return False
     
     try:
-        return _enhanced_martingale.force_complete_lane(lane_id, status)
+        return _enhanced_martingale.force_complete_lane(lane_id)
     except Exception as e:
         _log(f"Error completing Martingale lane: {e}", "ERROR")
         return False

@@ -14,6 +14,14 @@ except ImportError:
     DATABASE_AVAILABLE = False
     print("[WARNING] Database modules not available. Worker will run without database support.")
 
+# Enhanced Martingale imports
+try:
+    from enhanced_martingale import initialize_enhanced_martingale, get_enhanced_martingale_manager, EnhancedMartingaleManager
+    MARTINGALE_AVAILABLE = True
+except ImportError:
+    MARTINGALE_AVAILABLE = False
+    print("[WARNING] Enhanced Martingale modules not available. Worker will run without Martingale support.")
+
 # Worker specific logger
 def worker_log(worker_name, message, level="INFO"):
     """Simple logger for the worker process."""
@@ -27,6 +35,31 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
     worker_log(worker_name, f"Process started. Demo: {demo}. Initializing PocketOption.")
     api = None
     is_connected_and_ready = False
+    
+    # Initialize database manager and enhanced martingale manager for this worker
+    db_instance = None
+    martingale_manager_instance: EnhancedMartingaleManager = None
+
+    if DATABASE_AVAILABLE:
+        try:
+            if db_config.DATABASE_TYPE.lower() == "mysql":
+                db_instance = DatabaseManager(db_type='mysql', **db_config.MYSQL_CONFIG)
+            else:
+                db_instance = DatabaseManager(db_type='sqlite', db_path=db_config.SQLITE_DB_PATH)
+            worker_log(worker_name, "DatabaseManager initialized for worker.", "DEBUG")
+        except Exception as e:
+            worker_log(worker_name, f"Failed to initialize DatabaseManager in worker: {e}", "ERROR")
+            db_instance = None # Ensure it's None if initialization fails
+
+    if MARTINGALE_AVAILABLE and db_instance:
+        try:
+            # Pass the worker's own db_instance to the Martingale manager
+            martingale_manager_instance = initialize_enhanced_martingale(db_manager=db_instance, logger_func=worker_log)
+            worker_log(worker_name, "EnhancedMartingaleManager initialized for worker.", "DEBUG")
+        except Exception as e:
+            worker_log(worker_name, f"Failed to initialize EnhancedMartingaleManager in worker: {e}", "ERROR")
+            martingale_manager_instance = None # Ensure it's None if initialization fails
+
 
     # --- Connection Health Check ---
     def check_connection_health():
@@ -244,18 +277,12 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                                 worker_log(worker_name, f"Trade failed: {response}", "ERROR")
                                 
                             # Log trade to database if we have a successful trade
-                            if response.get('status') == 'success' and DATABASE_AVAILABLE:
+                            if response.get('status') == 'success' and DATABASE_AVAILABLE and db_instance:
                                 try:
                                     trade_data = response.get('data', {})
                                     trade_id = trade_data.get('trade_id')
                                     if trade_id:
-                                        if db_config.DATABASE_TYPE.lower() == "mysql":
-                                            config = DatabaseConfig.mysql_config(**db_config.MYSQL_CONFIG)
-                                        else:
-                                            config = DatabaseConfig.sqlite_config(db_config.SQLITE_DB_PATH)
-                                        
-                                        db = DatabaseManager(**config)
-                                        db.add_trade(
+                                        db_instance.add_trade(
                                             trade_id=trade_id,
                                             worker_name=worker_name,
                                             symbol=params.get('pair', 'unknown'),
@@ -263,7 +290,6 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                                             amount=params.get('amount', 0),
                                             expiration_duration=params.get('expiration_duration', 0)
                                         )
-                                        db.close()
                                         worker_log(worker_name, f"Trade {trade_id} logged to database", "DEBUG")
                                 except Exception as e_db_trade:
                                     worker_log(worker_name, f"Failed to log trade to database: {e_db_trade}", "WARNING")
@@ -319,6 +345,27 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                                 response = {'request_id': request_id, 'status': 'success', 
                                            'data': {'trade_id': trade_id, 'profit': profit, 'result': status}}
                                 worker_log(worker_name, f"Trade {trade_id} result: {status}, profit: {profit}", "INFO")
+
+                                # --- NEW: Process trade result directly in worker ---
+                                if status in ["win", "loose"] and DATABASE_AVAILABLE and db_instance:
+                                    try:
+                                        # Update database
+                                        parsed_status = 'loss' if status == 'loose' else status
+                                        db_instance.update_trade_result(trade_id, parsed_status, profit)
+                                        worker_log(worker_name, f"Database updated for trade {trade_id}: {status}", "DEBUG")
+                                        
+                                        # Notify Enhanced Martingale Manager
+                                        if MARTINGALE_AVAILABLE and martingale_manager_instance:
+                                            # The handle_trade_result expects 'loose' as 'loss'
+                                            martingale_status = 'loss' if status == 'loose' else 'loss' if status == 'loss' else status
+                                            martingale_manager_instance.handle_trade_result(trade_id, martingale_status, profit)
+                                            worker_log(worker_name, f"Enhanced Martingale handled trade {trade_id} result: {martingale_status}", "DEBUG")
+                                    except Exception as e_process_result:
+                                        worker_log(worker_name, f"Error processing trade result in worker (DB/Martingale): {e_process_result}", "ERROR")
+                                        import traceback
+                                        worker_log(worker_name, f"Result processing traceback: {traceback.format_exc()}", "ERROR")
+                                # --- END NEW ---
+
                             else:
                                 response = {'request_id': request_id, 'status': 'pending', 
                                            'message': f'Trade {trade_id} still pending, status: {status}'}
@@ -341,13 +388,34 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                         response_queue.put(response)
                         
                         # Now monitor the trade until expiration + buffer
-                        monitor_timeout = expiration_time + 30  # 30 seconds buffer after expiration
+                        monitor_timeout = expiration_time + 2  # 30 seconds buffer after expiration
                         start_time = time.time()
                         
                         while time.time() < monitor_timeout:
                             try:
                                 profit, status = api.check_win(trade_id)
                                 if status in ["win", "loose"]:
+                                    # --- NEW: Process trade result directly in worker ---
+                                    # Parse 'loose' as 'loss' for consistency
+                                    parsed_status = 'loss' if status == 'loose' else status
+                                    if DATABASE_AVAILABLE and db_instance:
+                                        try:
+                                            # Update database
+                                            db_instance.update_trade_result(trade_id, parsed_status, profit)
+                                            worker_log(worker_name, f"Database updated for trade {trade_id}: {status}", "DEBUG")
+                                            
+                                            # Notify Enhanced Martingale Manager
+                                            if MARTINGALE_AVAILABLE and martingale_manager_instance:
+                                                # The handle_trade_result expects 'loose' as 'loss'
+                                                martingale_status = 'loss' if status == 'loose' else status
+                                                martingale_manager_instance.handle_trade_result(trade_id, martingale_status, profit)
+                                                worker_log(worker_name, f"Enhanced Martingale handled trade {trade_id} result: {martingale_status}", "DEBUG")
+                                        except Exception as e_process_result:
+                                            worker_log(worker_name, f"Error processing trade result in worker (DB/Martingale) during monitor: {e_process_result}", "ERROR")
+                                            import traceback
+                                            worker_log(worker_name, f"Monitor result processing traceback: {traceback.format_exc()}", "ERROR")
+                                    # --- END NEW ---
+
                                     # Trade completed - send result
                                     result_response = {
                                         'request_id': f'{request_id}_result',

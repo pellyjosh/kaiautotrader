@@ -206,6 +206,50 @@ class PocketWorkerManager:
         self.start_result_monitoring()
         global_value.logger("[WorkerManager] Trade result monitoring started", "DEBUG")
 
+    def get_any_worker_response(self, timeout=1.0):
+        """
+        Check for any response from any worker (non-blocking)
+        Returns the first available response or None if timeout
+        """
+        try:
+            for worker_name, worker_info in self.workers.items():
+                if not worker_info['process'].is_alive():
+                    continue
+                    
+                try:
+                    response = worker_info['resp_q'].get_nowait()
+                    if response:
+                        # Add worker name to response for tracking
+                        response['worker_name'] = worker_name
+                        return response
+                except multiprocessing.queues.Empty:
+                    continue
+            
+            # If no immediate responses, wait briefly for any response
+            if timeout > 0:
+                import select
+                # Use a short sleep instead of complex select logic for simplicity
+                time.sleep(min(timeout, 0.1))
+                
+                # Try one more time after brief wait
+                for worker_name, worker_info in self.workers.items():
+                    if not worker_info['process'].is_alive():
+                        continue
+                        
+                    try:
+                        response = worker_info['resp_q'].get_nowait()
+                        if response:
+                            response['worker_name'] = worker_name
+                            return response
+                    except multiprocessing.queues.Empty:
+                        continue
+            
+            return None
+            
+        except Exception as e:
+            global_value.logger(f"[WorkerManager] Error in get_any_worker_response: {e}", "ERROR")
+            return None
+
     def send_command(self, account_name, action, params=None, timeout=15):
         if account_name not in self.workers:
             global_value.logger(f"[WorkerManager] No worker found for account: {account_name}", "ERROR")
@@ -231,7 +275,8 @@ class PocketWorkerManager:
                     if response.get('request_id') == request_id:
                         return response
                     else:
-                        # Handle unexpected/late responses if necessary
+                        # Handle unexpected/late responses - these might be trade_completed or trade_timeout messages
+                        self._handle_worker_response(account_name, response)
                         global_value.logger(f"[WorkerManager] Received out-of-order/late response for {account_name}: {response}", "DEBUG")
                 except multiprocessing.queues.Empty:
                     pass # No response yet, continue waiting

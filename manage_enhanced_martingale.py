@@ -129,13 +129,13 @@ def show_lane_statistics(db, account_name=None, days=30):
         print(f"Error showing statistics: {e}")
 
 
-def force_complete_lane(db, lane_id, status='cancelled'):
+def force_complete_lane(db, lane_id):
     """Force complete a Martingale lane"""
     try:
-        success = db.complete_martingale_lane(lane_id, status)
+        success = db.complete_martingale_lane(lane_id)
         
         if success:
-            print(f"Successfully completed lane '{lane_id}' with status: {status}")
+            print(f"Successfully completed lane '{lane_id}'")
         else:
             print(f"Failed to complete lane '{lane_id}'")
         
@@ -241,7 +241,7 @@ Enhanced Martingale Management Examples:
             show_lane_statistics(db, args.account, args.days)
         
         elif args.command == 'complete':
-            force_complete_lane(db, args.lane_id, args.status)
+            force_complete_lane(db, args.lane_id)
     
     finally:
         db.close()

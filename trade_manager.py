@@ -15,9 +15,8 @@ class TradeManager:
     """
     Centralized trade manager that:
     1. Schedules trades immediately when signals arrive
-    2. Monitors all active trades in a single thread
-    3. Updates database in real-time
-    4. Prevents command queuing delays
+    2. Updates database in real-time
+    3. Prevents command queuing delays
     """
     
     def __init__(self, worker_manager, db_manager, logger_func=None):
@@ -31,7 +30,6 @@ class TradeManager:
         self.monitoring_active = False
         
         # Threading
-        self.monitor_thread = None
         self.scheduler_thread = None
         self.lock = threading.RLock()
         
@@ -57,22 +55,12 @@ class TradeManager:
             )
             self.scheduler_thread.start()
             
-            # Start trade monitor thread
-            self.monitor_thread = threading.Thread(
-                target=self._trade_monitor_loop,
-                name="TradeMonitor", 
-                daemon=True
-            )
-            self.monitor_thread.start()
-            
-            self._log("Trade Manager started with scheduler and monitor threads", "INFO")
+            self._log("Trade Manager started with scheduler thread", "INFO")
     
     def stop(self):
         """Stop the trade manager"""
         with self.lock:
             self.monitoring_active = False
-            if self.monitor_thread and self.monitor_thread.is_alive():
-                self.monitor_thread.join(timeout=5)
             if self.scheduler_thread and self.scheduler_thread.is_alive():
                 self.scheduler_thread.join(timeout=5)
             self._log("Trade Manager stopped", "INFO")
@@ -172,6 +160,7 @@ class TradeManager:
             for account_name in target_accounts:
                 # Get the correct trade amount from Enhanced Martingale system
                 if enhanced_manager:
+                    # Ensure the EnhancedMartingaleManager has the correct method implemented
                     trade_amount, lane_id = enhanced_manager.get_trade_amount_for_signal(account_name, pair)
                     if trade_amount <= 0:
                         self._log(f"Enhanced Martingale blocked trade for {account_name} (amount: ${trade_amount})", "WARNING")
@@ -243,27 +232,30 @@ class TradeManager:
                                 self._log(f"Error registering trade with Enhanced Martingale: {e}", "WARNING")
                         
                         # Start monitoring this trade
-                        trade_info = {
+                        monitor_params = {
                             'trade_id': real_trade_id,
-                            'tracking_id': tracking_id,
-                            'account_name': account_name,
-                            'symbol': pair,
-                            'amount': trade_amount,
-                            'action': action,
-                            'start_time': time.time(),
-                            'expiration_time': time.time() + expiration,
-                            'status': 'active',
-                            'lane_id': lane_id  # Include lane_id for Enhanced Martingale tracking
+                            'expiration_time': time.time() + expiration, # Pass actual expiration time
+                            'symbol': pair # Pass symbol for Martingale tracking in worker
                         }
-                        
-                        with self.lock:
-                            self.active_trades[real_trade_id] = trade_info
-                            
-                        self._log(f"Started monitoring trade {real_trade_id} for {account_name} (${trade_amount})", "DEBUG")
+                        # Send monitor_trade command to worker. Worker will handle result processing and database updates.
+                        self.worker_manager.send_command(
+                            account_name,
+                            'monitor_trade',
+                            params=monitor_params,
+                            timeout=5 # Short timeout, just to send the command
+                        )
+                        self._log(f"Sent monitor_trade command to worker for trade {real_trade_id}", "DEBUG")
                         success_count += 1
+
+                        # Update martingale lane status in the database
+                        try:
+                            if lane_id is not None:
+                                self.db_manager.update_martingale_lane_status(lane_id, 'active')
+                                self._log(f"Updated martingale lane status in DB for lane {lane_id} (account: {account_name}, trade: {real_trade_id})", "DEBUG")
+                        except Exception as e:
+                            self._log(f"Error updating martingale lane status in DB: {e}", "WARNING")
                 else:
                     self._log(f"Trade execution failed for {account_name}: {result}", "ERROR")
-                    
             return success_count > 0
             
         except Exception as e:
@@ -281,208 +273,6 @@ class TradeManager:
             return enabled_workers
         else:
             return [target_account] if target_account in self.worker_manager.workers else []
-    
-    def _trade_monitor_loop(self):
-        """
-        Smart trade monitoring loop with persistent retry logic
-        Starts checking 5 seconds before expiration and retries until result is obtained
-        """
-        self._log("Trade monitor started with smart scheduling and persistent retry", "DEBUG")
-        
-        while self.monitoring_active:
-            try:
-                current_time = time.time()
-                completed_trades = []
-                next_check_time = current_time + 60  # Default 60 seconds if no trades
-                
-                with self.lock:
-                    for trade_id, trade_info in self.active_trades.items():
-                        trade_expiration = trade_info['expiration_time']
-                        
-                        # Start checking 5 seconds before expiration
-                        check_start_time = trade_expiration - 5
-                        
-                        # If trade is ready for checking (5 seconds before expiration or after)
-                        if current_time >= check_start_time:
-                            # If we're in retry mode, check every 5 seconds
-                            if 'retry_count' in trade_info:
-                                last_check = trade_info.get('last_retry_check', 0)
-                                if current_time - last_check >= 5:  # Retry every 5 seconds
-                                    trade_info['last_retry_check'] = current_time
-                                    if self._check_trade_completion_with_retry(trade_info, current_time):
-                                        completed_trades.append(trade_id)
-                            else:
-                                # First check
-                                if self._check_trade_completion_with_retry(trade_info, current_time):
-                                    completed_trades.append(trade_id)
-                        else:
-                            # Calculate when we should start checking this trade
-                            next_check_time = min(next_check_time, check_start_time)
-                
-                # Remove completed trades
-                for trade_id in completed_trades:
-                    with self.lock:
-                        if trade_id in self.active_trades:
-                            del self.active_trades[trade_id]
-                
-                # Smart sleep - only sleep until the next trade needs checking
-                sleep_duration = max(2, min(60, next_check_time - current_time))
-                if len(self.active_trades) > 0:
-                    self._log(f"Monitoring {len(self.active_trades)} active trades, next check in {sleep_duration:.1f}s", "DEBUG")
-                time.sleep(sleep_duration)
-                
-            except Exception as e:
-                self._log(f"Error in trade monitor: {e}", "ERROR")
-                time.sleep(10)  # Fallback sleep on error
-    
-    def _check_trade_completion_with_retry(self, trade_info: Dict, current_time: float) -> bool:
-        """
-        Check trade completion with persistent retry logic
-        Keeps retrying every 5 seconds until we get a real result (win/loss)
-        """
-        trade_id = trade_info['trade_id']
-        account_name = trade_info['account_name']
-        trade_expiration = trade_info['expiration_time']
-        
-        try:
-            # Skip check if trade was already marked as completed
-            if trade_info.get('result_processed'):
-                return True
-            
-            # Initialize retry tracking
-            if 'retry_count' not in trade_info:
-                trade_info['retry_count'] = 0
-                trade_info['first_check_time'] = current_time
-            
-            trade_info['retry_count'] += 1
-            
-            # Maximum timeout: 3 minutes after expiration 
-            max_timeout = trade_expiration + 180
-            if current_time > max_timeout:
-                self._log(f"Trade {trade_id} final timeout after {trade_info['retry_count']} retries - assuming loss", "WARNING")
-                self._update_trade_in_database(trade_info, "loss", -trade_info['amount'])
-                self._notify_martingale_system(trade_info, "loss", -trade_info['amount'])
-                self.total_trades_completed += 1
-                trade_info['result_processed'] = True
-                return True
-            
-            # Get trade result with extended timeout for retry
-            self._log(f"Checking trade {trade_id} result (attempt #{trade_info['retry_count']})", "DEBUG")
-            
-            result = self.worker_manager.send_command(
-                account_name,
-                'check_win',
-                params={'trade_id': trade_id},
-                timeout=20  # Extended timeout for retry
-            )
-            
-            if result and result.get('status') == 'success':
-                data = result.get('data', {})
-                profit = data.get('profit')
-                status = data.get('status')
-                
-                if status in ["win", "loose", "lose"]:  # Trade completed with real result
-                    # Normalize status
-                    result_status = "win" if status == "win" else "loss"
-                    
-                    # Mark as processed to prevent duplicate notifications
-                    trade_info['result_processed'] = True
-                    
-                    # Update database immediately
-                    self._update_trade_in_database(trade_info, result_status, profit)
-                    
-                    # Notify Enhanced Martingale system immediately
-                    self._notify_martingale_system(trade_info, result_status, profit)
-                    
-                    # Update statistics
-                    self.total_trades_completed += 1
-                    
-                    elapsed = current_time - trade_info['first_check_time']
-                    self._log(f"Trade {trade_id} completed: {result_status}, profit: ${profit} (after {trade_info['retry_count']} retries, {elapsed:.1f}s)", "INFO")
-                    return True
-                    
-                elif status == "active":
-                    # Trade still active, will retry in 5 seconds
-                    self._log(f"Trade {trade_id} still active, retry #{trade_info['retry_count']} in 5s", "DEBUG")
-                    return False
-                    
-                elif status == "unknown":
-                    # Unknown status, retry with shorter interval
-                    self._log(f"Trade {trade_id} unknown status, retry #{trade_info['retry_count']} in 5s", "DEBUG")
-                    return False
-                    
-            else:
-                # Timeout or error, retry in 5 seconds
-                self._log(f"Trade {trade_id} check failed (attempt #{trade_info['retry_count']}), retrying in 5s", "DEBUG")
-                return False
-                    
-        except Exception as e:
-            self._log(f"Error checking trade {trade_id} (attempt #{trade_info.get('retry_count', 0)}): {e}", "ERROR")
-            return False
-        
-        return False  # Continue retrying
-    
-    def _update_trade_in_database(self, trade_info: Dict, result: str, profit: float):
-        """Update trade result in database immediately"""
-        try:
-            if self.db_manager:
-                self.db_manager.update_trade_result(
-                    trade_info['trade_id'],
-                    result,
-                    profit or 0.0
-                )
-                self._log(f"Database updated for trade {trade_info['trade_id']}: {result}", "DEBUG")
-        except Exception as e:
-            self._log(f"Error updating database for trade {trade_info['trade_id']}: {e}", "ERROR")
-    
-    def _notify_martingale_system(self, trade_info: Dict, result: str, profit: float):
-        """Notify the Enhanced Martingale system of trade completion"""
-        try:
-            # First, try Enhanced Martingale system
-            from enhanced_martingale import get_enhanced_martingale_manager
-            enhanced_manager = get_enhanced_martingale_manager()
-            
-            if enhanced_manager:
-                # Use Enhanced Martingale's handle_trade_result method
-                handled = enhanced_manager.handle_trade_result(
-                    trade_info['trade_id'],
-                    result,
-                    profit or 0.0
-                )
-                if handled:
-                    self._log(f"Enhanced Martingale handled trade {trade_info['trade_id']} result: {result}", "DEBUG")
-                    
-                    # Check if Enhanced Martingale created new lanes for this loss
-                    if result == "loss":
-                        # Get updated lane status for the account
-                        account_name = trade_info['account_name']
-                        try:
-                            active_lanes = enhanced_manager._get_cached_active_lanes(account_name)
-                            if active_lanes:
-                                lane_info = [f"{lane['symbol']}:L{lane['current_level']}:${lane['current_amount']}" for lane in active_lanes]
-                                self._log(f"[{account_name}] Loss processed - Active lanes: {', '.join(lane_info)}", "INFO")
-                            else:
-                                self._log(f"[{account_name}] Loss processed but no active lanes found", "DEBUG")
-                        except Exception as lane_check_error:
-                            self._log(f"Error checking lanes after loss: {lane_check_error}", "WARNING")
-                    
-                    return  # Enhanced Martingale handled it successfully
-                else:
-                    self._log(f"Enhanced Martingale could not handle trade {trade_info['trade_id']} - falling back to legacy", "WARNING")
-            
-            # Fallback to legacy detectsignal Martingale system
-            from detectsignal import _handle_trade_result
-            _handle_trade_result(
-                trade_info['trade_id'],
-                trade_info['symbol'], 
-                result,
-                profit,
-                trade_info['account_name']
-            )
-            self._log(f"Legacy Martingale system notified for trade {trade_info['trade_id']}", "DEBUG")
-            
-        except Exception as e:
-            self._log(f"Error notifying Martingale system: {e}", "ERROR")
     
     def get_active_trades_count(self) -> int:
         """Get number of currently active trades"""
@@ -519,7 +309,6 @@ class TradeManager:
                 print(f"[{level}][TradeManager] {message}")
         else:
             print(f"[{level}][TradeManager] {message}")
-
 
 # Global trade manager instance
 _trade_manager_instance = None

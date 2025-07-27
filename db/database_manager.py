@@ -336,7 +336,7 @@ class DatabaseManager:
             lane_id VARCHAR(100) UNIQUE NOT NULL,
             account_name VARCHAR(100) NOT NULL,
             symbol VARCHAR(50) NOT NULL,
-            status ENUM('active', 'completed', 'cancelled') DEFAULT 'active',
+            status ENUM('active', 'inactive') DEFAULT 'inactive',
             current_level INTEGER DEFAULT 1,
             base_amount DECIMAL(10,2) NOT NULL,
             current_amount DECIMAL(10,2) NOT NULL,
@@ -344,7 +344,7 @@ class DatabaseManager:
             max_level INTEGER DEFAULT 7,
             total_invested DECIMAL(10,2) DEFAULT 0.00,
             total_potential_payout DECIMAL(10,2) DEFAULT 0.00,
-            trade_ids TEXT DEFAULT '[]',
+            trade_ids TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             completed_at TIMESTAMP NULL,
@@ -1353,7 +1353,7 @@ class DatabaseManager:
     
     # === ENHANCED MARTINGALE LANES METHODS ===
     
-    def create_martingale_lane(self, account_name: str, symbol: str, base_amount: float, multiplier: float = 2.5, max_level: int = 7) -> str:
+    def create_martingale_lane(self, account_name: str, symbol: str, base_amount: float, multiplier: float = 2.5, max_level: int = 7, status: str = 'inactive') -> str:
         """Create a new Martingale lane and return its lane_id"""
         try:
             import uuid
@@ -1361,22 +1361,23 @@ class DatabaseManager:
             
             if self.db_type == "mysql":
                 query = """
-                INSERT INTO martingale_lanes (lane_id, account_name, symbol, base_amount, current_amount, multiplier, max_level)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, base_amount, current_amount, multiplier, max_level, trade_ids)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
+                params = (lane_id, account_name, symbol, status, base_amount, base_amount, multiplier, max_level, '[]')
             else:
                 query = """
-                INSERT INTO martingale_lanes (lane_id, account_name, symbol, base_amount, current_amount, multiplier, max_level)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, base_amount, current_amount, multiplier, max_level, trade_ids)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
+                params = (lane_id, account_name, symbol, status, base_amount, base_amount, multiplier, max_level, '[]')
             
-            params = (lane_id, account_name, symbol, base_amount, base_amount, multiplier, max_level)
             self._execute_query(query, params)
             
             if self.db_type == "mysql":
                 self.connection.commit()
             
-            self.logger.info(f"Created Martingale lane {lane_id} for {account_name} - {symbol}")
+            self.logger.info(f"Created Martingale lane {lane_id} for {account_name} - {symbol} with status {status}")
             return lane_id
             
         except Exception as e:
@@ -1386,7 +1387,97 @@ class DatabaseManager:
     def get_active_martingale_lanes(self, account_name: str = None, symbol: str = None) -> List[Dict]:
         """Get active Martingale lanes, optionally filtered by account or symbol"""
         try:
-            base_query = "SELECT * FROM martingale_lanes WHERE status = 'active'"
+            base_query = "SELECT * FROM martingale_lanes WHERE status = 'active' AND account_name = %s"
+            params = []
+            
+            if account_name:
+                # Removed duplicate account_name filter
+                params.append(account_name)
+            
+            if symbol:
+                base_query += " AND symbol = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(symbol)
+            
+            base_query += " ORDER BY created_at ASC"  # FIFO ordering
+            
+            results = self._execute_query(base_query, tuple(params), fetch="all")
+            
+            lanes = []
+            for row in results:
+                lane = {
+                    'lane_id': row[1],
+                    'account_name': row[2], 
+                    'symbol': row[3],
+                    'status': row[4],
+                    'current_level': row[5],
+                    'base_amount': float(row[6]),
+                    'current_amount': float(row[7]),
+                    'multiplier': float(row[8]),
+                    'max_level': row[9],
+                    'total_invested': float(row[10]),
+                    'total_potential_payout': float(row[11]),
+                    'trade_ids': json.loads(row[12]) if row[12] else [],
+                    'created_at': row[13],
+                    'updated_at': row[14],
+                    'completed_at': row[15]
+                }
+                lanes.append(lane)
+            
+            return lanes
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get active Martingale lanes: {e}")
+            return []
+    
+    def get_all_martingale_lanes(self, account_name: str = None, symbol: str = None) -> List[Dict]:
+        """Get all Martingale lanes, optionally filtered by account or symbol"""
+        try:
+            base_query = "SELECT * FROM martingale_lanes"
+            params = []
+            
+            if account_name:
+                base_query += " WHERE account_name = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(account_name)
+            
+            if symbol:
+                base_query += " AND symbol = " + ("%s" if self.db_type == "mysql" else "?")
+                params.append(symbol)
+            
+            base_query += " ORDER BY created_at ASC"  # FIFO ordering
+            
+            results = self._execute_query(base_query, tuple(params), fetch="all")
+            
+            lanes = []
+            for row in results:
+                lane = {
+                    'lane_id': row[1],
+                    'account_name': row[2], 
+                    'symbol': row[3],
+                    'status': row[4],
+                    'current_level': row[5],
+                    'base_amount': float(row[6]),
+                    'current_amount': float(row[7]),
+                    'multiplier': float(row[8]),
+                    'max_level': row[9],
+                    'total_invested': float(row[10]),
+                    'total_potential_payout': float(row[11]),
+                    'trade_ids': json.loads(row[12]) if row[12] else [],
+                    'created_at': row[13],
+                    'updated_at': row[14],
+                    'completed_at': row[15]
+                }
+                lanes.append(lane)
+            
+            return lanes
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get all Martingale lanes: {e}")
+            return []
+    
+    def get_inactive_martingale_lanes(self, account_name: str = None, symbol: str = None) -> List[Dict]:
+        """Get inactive Martingale lanes, optionally filtered by account or symbol"""
+        try:
+            base_query = "SELECT * FROM martingale_lanes WHERE status = 'inactive'"
             params = []
             
             if account_name:
@@ -1425,8 +1516,42 @@ class DatabaseManager:
             return lanes
             
         except Exception as e:
-            self.logger.error(f"Failed to get active Martingale lanes: {e}")
+            self.logger.error(f"Failed to get inactive Martingale lanes: {e}")
             return []
+        
+    def update_martingale_lane_status(self, lane_id: str, status: str) -> bool:
+        """Update the status of a Martingale lane (active, completed, cancelled, inactive)"""
+        try:
+            if status not in ('active', 'completed', 'cancelled', 'inactive'):
+                self.logger.error(f"Invalid status '{status}' for Martingale lane")
+                return False
+
+            if self.db_type == "mysql":
+                query = """
+                UPDATE martingale_lanes
+                SET status = %s, updated_at = NOW()
+                WHERE lane_id = %s
+                """
+                params = (status, lane_id)
+            else:
+                query = """
+                UPDATE martingale_lanes
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE lane_id = ?
+                """
+                params = (status, lane_id)
+
+            self._execute_query(query, params)
+
+            if self.db_type == "mysql":
+                self.connection.commit()
+
+            self.logger.info(f"Updated Martingale lane {lane_id} status to {status}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to update Martingale lane status: {e}")
+            return False
     
     def get_next_lane_for_assignment(self, account_name: str, symbol: str = None) -> Dict:
         """Get the next Martingale lane for trade assignment based on strategy"""
@@ -1438,14 +1563,14 @@ class DatabaseManager:
             if strategy == 'symbol_priority':
                 # For symbol_priority, first try to get lanes with matching symbol
                 if symbol:
-                    symbol_lanes = self.get_active_martingale_lanes(account_name, symbol)
+                    symbol_lanes = self.get_inactive_martingale_lanes(account_name, symbol)
                     if symbol_lanes:
                         return symbol_lanes[0]  # Return oldest matching symbol lane
                 # Fallback to all lanes if no matching symbol
-                lanes = self.get_active_martingale_lanes(account_name, None)
+                lanes = self.get_inactive_martingale_lanes(account_name, None)
             else:
                 # For fifo and round_robin, get ALL active lanes (no symbol filter)
-                lanes = self.get_active_martingale_lanes(account_name, None)
+                lanes = self.get_inactive_martingale_lanes(account_name, None)
             
             if not lanes:
                 return None
@@ -1519,24 +1644,24 @@ class DatabaseManager:
             self.logger.error(f"Failed to update Martingale lane: {e}")
             return False
     
-    def complete_martingale_lane(self, lane_id: str, status: str = 'completed') -> bool:
-        """Mark a Martingale lane as completed or cancelled"""
+    def complete_martingale_lane(self, lane_id: str) -> bool:
+        """Delete a Martingale lane from the database"""
         try:
             if self.db_type == "mysql":
-                query = "UPDATE martingale_lanes SET status = %s, completed_at = NOW(), updated_at = NOW() WHERE lane_id = %s"
+                query = "DELETE FROM martingale_lanes WHERE lane_id = %s"
             else:
-                query = "UPDATE martingale_lanes SET status = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE lane_id = ?"
+                query = "DELETE FROM martingale_lanes WHERE lane_id = ?"
             
-            self._execute_query(query, (status, lane_id))
+            self._execute_query(query, (lane_id,))
             
             if self.db_type == "mysql":
                 self.connection.commit()
             
-            self.logger.info(f"Completed Martingale lane {lane_id} with status: {status}")
+            self.logger.info(f"Deleted Martingale lane {lane_id}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to complete Martingale lane: {e}")
+            self.logger.error(f"Failed to delete Martingale lane: {e}")
             return False
     
     def get_trading_settings(self, account_name: str) -> Dict:

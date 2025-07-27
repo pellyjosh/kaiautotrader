@@ -54,7 +54,7 @@ def test_trade_result_integration():
                 'trade_id': 'trade_12345',
                 'symbol': 'EURUSD_otc',
                 'profit': -1.5,
-                'result': 'loose',
+                'result': 'loss',
                 'monitoring_duration': 65.2
             }
         }
@@ -73,7 +73,7 @@ def test_trade_result_integration():
         mock_handle_result.assert_called_once_with(
             'trade_12345',      # trade_id
             'EURUSD_otc',       # symbol 
-            'loss',             # result (converted from 'loose')
+            'loss',             # result
             -1.5                # profit
         )
         

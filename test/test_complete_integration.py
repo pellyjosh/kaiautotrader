@@ -21,10 +21,10 @@ def test_complete_signal_to_martingale_flow():
     
     # Setup scenario
     scenario_trades = [
-        {'symbol': 'EURUSD_otc', 'action': 'call', 'amount': 1.0, 'result': 'loose', 'profit': -1.0},
-        {'symbol': 'GBPUSD_otc', 'action': 'put', 'amount': 2.5, 'result': 'loose', 'profit': -2.5},  # Martingale
+        {'symbol': 'EURUSD_otc', 'action': 'call', 'amount': 1.0, 'result': 'loss', 'profit': -1.0},
+        {'symbol': 'GBPUSD_otc', 'action': 'put', 'amount': 2.5, 'result': 'loss', 'profit': -2.5},  # Martingale
         {'symbol': 'BITCOIN_otc', 'action': 'call', 'amount': 6.25, 'result': 'win', 'profit': 11.25},  # Reset
-        {'symbol': 'AUDUSD_otc', 'action': 'put', 'amount': 1.0, 'result': 'loose', 'profit': -1.0},   # Fresh start
+        {'symbol': 'AUDUSD_otc', 'action': 'put', 'amount': 1.0, 'result': 'loss', 'profit': -1.0},   # Fresh start
     ]
     
     print("📋 Test Scenario - Sequential Trades:")
