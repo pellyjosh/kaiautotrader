@@ -2,6 +2,8 @@
 import time
 import json # Import the json module
 import multiprocessing
+import threading
+import signal
 from pocketoptionapi.stable_api import PocketOption
 import pocketoptionapi.global_value as global_value # Each process has its own global_value
 
@@ -26,6 +28,111 @@ except ImportError:
 def worker_log(worker_name, message, level="INFO"):
     """Simple logger for the worker process."""
     print(f"[{level}][{worker_name}] {message}")
+
+def timeout_api_call(api_func, timeout_seconds=10, *args, **kwargs):
+    """
+    Execute an API call with a timeout to prevent hanging.
+    """
+    result = [None]
+    exception = [None]
+    
+    def target():
+        try:
+            result[0] = api_func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+    
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout_seconds)
+    
+    if thread.is_alive():
+        # Thread is still running, meaning timeout occurred
+        raise TimeoutError(f"API call timed out after {timeout_seconds} seconds")
+    
+    if exception[0]:
+        raise exception[0]
+    
+    return result[0]
+
+def monitor_trade_thread(worker_name, api, trade_id, expiration_time, symbol, request_id, response_queue, db_instance=None, martingale_manager_instance=None):
+    """
+    Monitor a trade in a separate thread to avoid blocking the main worker loop.
+    """
+    try:
+        monitor_timeout = expiration_time + 30  # 30 seconds buffer after expiration
+        start_time = time.time()
+        
+        while time.time() < monitor_timeout:
+            try:
+                profit, status = api.check_win(trade_id)
+                if status in ["win", "loose"]:
+                    # Process trade result directly in worker thread
+                    parsed_status = 'loss' if status == 'loose' else status
+                    if DATABASE_AVAILABLE and db_instance:
+                        try:
+                            # Update database
+                            db_instance.update_trade_result(trade_id, parsed_status, profit)
+                            worker_log(worker_name, f"Database updated for trade {trade_id}: {status}", "DEBUG")
+                            
+                            # Notify Enhanced Martingale Manager
+                            if MARTINGALE_AVAILABLE and martingale_manager_instance:
+                                martingale_status = 'loss' if status == 'loose' else status
+                                martingale_manager_instance.handle_trade_result(trade_id, martingale_status, profit)
+                                worker_log(worker_name, f"Enhanced Martingale handled trade {trade_id} result: {martingale_status}", "DEBUG")
+                        except Exception as e_process_result:
+                            worker_log(worker_name, f"Error processing trade result in monitor thread (DB/Martingale): {e_process_result}", "ERROR")
+                            import traceback
+                            worker_log(worker_name, f"Monitor thread result processing traceback: {traceback.format_exc()}", "ERROR")
+
+                    # Trade completed - send result
+                    result_response = {
+                        'request_id': f'{request_id}_result',
+                        'status': 'trade_completed',
+                        'data': {
+                            'trade_id': trade_id,
+                            'symbol': symbol,
+                            'profit': profit,
+                            'result': status,
+                            'monitoring_duration': time.time() - start_time
+                        }
+                    }
+                    response_queue.put(result_response)
+                    worker_log(worker_name, f"Trade {trade_id} completed: {status}, profit: {profit}", "INFO")
+                    return  # Exit monitoring thread
+                elif status == "unknown":
+                    worker_log(worker_name, f"Trade {trade_id} status unknown, continuing to monitor...", "DEBUG")
+            except Exception as e_monitor:
+                worker_log(worker_name, f"Error monitoring trade {trade_id}: {e_monitor}", "ERROR")
+            
+            time.sleep(2)  # Check every 2 seconds
+        
+        # Timeout reached
+        timeout_response = {
+            'request_id': f'{request_id}_timeout',
+            'status': 'trade_timeout',
+            'data': {
+                'trade_id': trade_id,
+                'symbol': symbol,
+                'message': f'Monitoring timeout after {time.time() - start_time:.1f} seconds'
+            }
+        }
+        response_queue.put(timeout_response)
+        worker_log(worker_name, f"Trade {trade_id} monitoring timed out", "WARNING")
+        
+    except Exception as e_thread:
+        worker_log(worker_name, f"Error in monitor thread for trade {trade_id}: {e_thread}", "ERROR")
+        error_response = {
+            'request_id': f'{request_id}_error',
+            'status': 'monitor_error',
+            'data': {
+                'trade_id': trade_id,
+                'symbol': symbol,
+                'message': f'Monitor thread error: {str(e_thread)}'
+            }
+        }
+        response_queue.put(error_response)
 
 def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
     """
@@ -160,9 +267,12 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
     try:
         while True:
             try:
-                command = command_queue.get(timeout=3600) # Block with a very long timeout
-            except multiprocessing.queues.Empty: # Should not happen with long timeout
-                continue # Go back to waiting
+                command = command_queue.get(timeout=1)  # Reduced timeout for more responsive processing
+            except multiprocessing.queues.Empty:
+                # Check connection health periodically during idle time
+                if not check_connection_health():
+                    worker_log(worker_name, "Connection health check failed during idle time. Attempting reconnection...", "WARNING")
+                continue  # Go back to waiting
 
             if command is None or command.get('action') == 'shutdown':
                 worker_log(worker_name, "Shutdown command received.", "INFO")
@@ -201,13 +311,16 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                     worker_log(worker_name, f"Executing BUY: {params}", "DEBUG")
                     worker_log(worker_name, f"About to call api.buy with params: amount={params['amount']}, active={params['pair']}, action={params['action']}, expirations={params['expiration_duration']}", "DEBUG")
                     
-                    # Retry logic for SSL/connection errors
-                    max_retries = 3
-                    retry_delay = 2  # seconds
+                    # Retry logic for SSL/connection errors with reduced delays for faster execution
+                    max_retries = 2  # Reduced from 3 to 2 for faster response
+                    retry_delay = 1  # Reduced from 2 to 1 second
                     
                     for attempt in range(max_retries):
                         try:
-                            trade_result = api.buy(
+                            # Set a timeout for the buy operation to prevent hanging
+                            trade_result = timeout_api_call(
+                                api.buy,
+                                timeout_seconds=8,  # 8 second timeout for API call
                                 amount=params['amount'],
                                 active=params['pair'],
                                 action=params['action'],
@@ -220,8 +333,8 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                             
                         except (ConnectionError, OSError, Exception) as e:
                             error_str = str(e).lower()
-                            if any(keyword in error_str for keyword in ['ssl', 'connection', 'protocol', 'socket', 'network']):
-                                worker_log(worker_name, f"SSL/Connection error (attempt {attempt + 1}/{max_retries}): {e}", "WARNING")
+                            if any(keyword in error_str for keyword in ['ssl', 'connection', 'protocol', 'socket', 'network', 'timeout']):
+                                worker_log(worker_name, f"SSL/Connection/Timeout error (attempt {attempt + 1}/{max_retries}): {e}", "WARNING")
                                 if attempt < max_retries - 1:
                                     worker_log(worker_name, f"Retrying in {retry_delay} seconds...", "INFO")
                                     time.sleep(retry_delay)
@@ -382,76 +495,18 @@ def po_worker_main(worker_name, ssid, demo, command_queue, response_queue):
                     if not trade_id:
                         response = {'request_id': request_id, 'status': 'error', 'message': 'trade_id required for monitor_trade'}
                     else:
-                        # Start monitoring in background and send immediate response
+                        # Start monitoring in a separate thread - NON-BLOCKING
+                        monitor_thread = threading.Thread(
+                            target=monitor_trade_thread,
+                            args=(worker_name, api, trade_id, expiration_time, symbol, request_id, response_queue, db_instance, martingale_manager_instance),
+                            daemon=True  # Daemon thread will exit when main process exits
+                        )
+                        monitor_thread.start()
+                        
+                        # Send immediate response that monitoring has started
                         response = {'request_id': request_id, 'status': 'success', 
-                                   'message': f'Started monitoring trade {trade_id}'}
-                        response_queue.put(response)
-                        
-                        # Now monitor the trade until expiration + buffer
-                        monitor_timeout = expiration_time + 2  # 30 seconds buffer after expiration
-                        start_time = time.time()
-                        
-                        while time.time() < monitor_timeout:
-                            try:
-                                profit, status = api.check_win(trade_id)
-                                if status in ["win", "loose"]:
-                                    # --- NEW: Process trade result directly in worker ---
-                                    # Parse 'loose' as 'loss' for consistency
-                                    parsed_status = 'loss' if status == 'loose' else status
-                                    if DATABASE_AVAILABLE and db_instance:
-                                        try:
-                                            # Update database
-                                            db_instance.update_trade_result(trade_id, parsed_status, profit)
-                                            worker_log(worker_name, f"Database updated for trade {trade_id}: {status}", "DEBUG")
-                                            
-                                            # Notify Enhanced Martingale Manager
-                                            if MARTINGALE_AVAILABLE and martingale_manager_instance:
-                                                # The handle_trade_result expects 'loose' as 'loss'
-                                                martingale_status = 'loss' if status == 'loose' else status
-                                                martingale_manager_instance.handle_trade_result(trade_id, martingale_status, profit)
-                                                worker_log(worker_name, f"Enhanced Martingale handled trade {trade_id} result: {martingale_status}", "DEBUG")
-                                        except Exception as e_process_result:
-                                            worker_log(worker_name, f"Error processing trade result in worker (DB/Martingale) during monitor: {e_process_result}", "ERROR")
-                                            import traceback
-                                            worker_log(worker_name, f"Monitor result processing traceback: {traceback.format_exc()}", "ERROR")
-                                    # --- END NEW ---
-
-                                    # Trade completed - send result
-                                    result_response = {
-                                        'request_id': f'{request_id}_result',
-                                        'status': 'trade_completed',
-                                        'data': {
-                                            'trade_id': trade_id,
-                                            'symbol': symbol,  # Include symbol for Martingale tracking
-                                            'profit': profit,
-                                            'result': status,
-                                            'monitoring_duration': time.time() - start_time
-                                        }
-                                    }
-                                    response_queue.put(result_response)
-                                    worker_log(worker_name, f"Trade {trade_id} completed: {status}, profit: {profit}", "INFO")
-                                    break
-                                elif status == "unknown":
-                                    worker_log(worker_name, f"Trade {trade_id} status unknown, continuing to monitor...", "DEBUG")
-                            except Exception as e_monitor:
-                                worker_log(worker_name, f"Error monitoring trade {trade_id}: {e_monitor}", "ERROR")
-                            
-                            time.sleep(2)  # Check every 2 seconds
-                        else:
-                            # Timeout reached
-                            timeout_response = {
-                                'request_id': f'{request_id}_timeout',
-                                'status': 'trade_timeout',
-                                'data': {
-                                    'trade_id': trade_id,
-                                    'symbol': symbol,
-                                    'message': f'Monitoring timeout after {time.time() - start_time:.1f} seconds'
-                                }
-                            }
-                            response_queue.put(timeout_response)
-                            worker_log(worker_name, f"Trade {trade_id} monitoring timed out", "WARNING")
-                        
-                        continue  # Skip the normal response_queue.put since we already sent responses
+                                   'message': f'Started monitoring trade {trade_id} in background thread'}
+                        worker_log(worker_name, f"Started background monitoring thread for trade {trade_id}", "DEBUG")
 
             except Exception as e_action:
                 worker_log(worker_name, f"Error processing action '{action}': {e_action}", "ERROR")
