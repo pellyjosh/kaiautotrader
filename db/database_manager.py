@@ -1567,7 +1567,7 @@ class DatabaseManager:
                     if symbol_lanes:
                         return symbol_lanes[0]  # Return oldest matching symbol lane
                 # Fallback to all lanes if no matching symbol
-                lanes = self.get_inactive_martingale_lanes(account_name, None)
+                return None
             else:
                 # For fifo and round_robin, get ALL active lanes (no symbol filter)
                 lanes = self.get_inactive_martingale_lanes(account_name, None)
