@@ -396,7 +396,7 @@ def _handle_trade_result(trade_id, symbol, result, profit_loss=None, worker_name
                 worker_name=worker_name,
                 trade_result="win",
                 invested_amount=invested_amount,
-                payout_amount=payout,
+                payout_amount=profit_loss,
                 is_martingale_recovery=is_martingale_recovery
             )
         
@@ -420,7 +420,7 @@ def _handle_trade_result(trade_id, symbol, result, profit_loss=None, worker_name
                 worker_name=worker_name,
                 trade_result="loss",
                 invested_amount=invested_amount,
-                payout_amount=0.0
+                payout_amount=profit_loss
             )
         
     else:
