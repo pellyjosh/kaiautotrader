@@ -219,14 +219,15 @@ class TradeManager:
                         # Notify Enhanced Martingale system about the pending trade
                         if enhanced_manager:
                             try:
-                                # Register the trade with Enhanced Martingale for result tracking
-                                enhanced_manager.pending_trade_results[real_trade_id] = {
-                                    'account_name': account_name,
-                                    'symbol': pair,
-                                    'amount': trade_amount,
-                                    'lane_id': lane_id,
-                                    'timestamp': time.time()
-                                }
+                                # Use the proper method to handle trade placement
+                                enhanced_manager.handle_trade_placed(
+                                    trade_id=real_trade_id,
+                                    account_name=account_name,
+                                    symbol=pair,
+                                    amount=trade_amount,
+                                    lane_id=lane_id,
+                                    expected_payout=0.0  # We don't have payout info at this stage
+                                )
                                 self._log(f"Registered trade {real_trade_id} with Enhanced Martingale for {account_name}", "DEBUG")
                             except Exception as e:
                                 self._log(f"Error registering trade with Enhanced Martingale: {e}", "WARNING")

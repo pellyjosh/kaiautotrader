@@ -358,7 +358,7 @@ class DatabaseManager:
             lane_id TEXT UNIQUE NOT NULL,
             account_name TEXT NOT NULL,
             symbol TEXT NOT NULL,
-            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+            status TEXT DEFAULT 'inactive' CHECK (status IN ('active', 'inactive')),
             current_level INTEGER DEFAULT 1,
             base_amount REAL NOT NULL,
             current_amount REAL NOT NULL,
@@ -1361,16 +1361,16 @@ class DatabaseManager:
             
             if self.db_type == "mysql":
                 query = """
-                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, base_amount, current_amount, multiplier, max_level, trade_ids)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, current_level, base_amount, current_amount, multiplier, max_level, trade_ids)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
-                params = (lane_id, account_name, symbol, status, base_amount, base_amount, multiplier, max_level, '[]')
+                params = (lane_id, account_name, symbol, status, 1, base_amount, base_amount, multiplier, max_level, '[]')
             else:
                 query = """
-                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, base_amount, current_amount, multiplier, max_level, trade_ids)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO martingale_lanes (lane_id, account_name, symbol, status, current_level, base_amount, current_amount, multiplier, max_level, trade_ids)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
-                params = (lane_id, account_name, symbol, status, base_amount, base_amount, multiplier, max_level, '[]')
+                params = (lane_id, account_name, symbol, status, 1, base_amount, base_amount, multiplier, max_level, '[]')
             
             self._execute_query(query, params)
             
@@ -1594,25 +1594,32 @@ class DatabaseManager:
     def update_martingale_lane_on_trade(self, lane_id: str, trade_id: str, trade_amount: float, expected_payout: float = 0.0) -> bool:
         """Update Martingale lane when a trade is placed"""
         try:
+            self.logger.debug(f"Updating lane {lane_id} with trade {trade_id}, amount ${trade_amount}")
+            
             # Get current lane data
             query = "SELECT trade_ids, total_invested, total_potential_payout, current_level, base_amount, multiplier FROM martingale_lanes WHERE lane_id = " + ("%s" if self.db_type == "mysql" else "?")
             result = self._execute_query(query, (lane_id,), fetch="one")
             
             if not result:
-                self.logger.error(f"Martingale lane {lane_id} not found")
+                self.logger.error(f"Martingale lane {lane_id} not found in database")
                 return False
             
             trade_ids_json, total_invested, total_potential_payout, current_level, base_amount, multiplier = result
             trade_ids = json.loads(trade_ids_json) if trade_ids_json else []
+            
+            self.logger.debug(f"Lane {lane_id} current state: Level {current_level}, Invested ${total_invested}, Trades: {len(trade_ids)}")
             
             # Add new trade
             trade_ids.append(trade_id)
             new_total_invested = float(total_invested) + trade_amount
             new_total_potential_payout = float(total_potential_payout) + expected_payout
             
-            # Calculate next level amount for future use
+            # Calculate next level and amount correctly
+            # Level progression: 1=base, 2=base*multiplier, 3=base*multiplier^2, etc.
             next_level = current_level + 1
             next_amount = float(base_amount) * (float(multiplier) ** (next_level - 1))
+            
+            self.logger.debug(f"Lane {lane_id} updating to: Level {next_level}, Amount ${next_amount}, Invested ${new_total_invested}")
             
             # Update the lane
             if self.db_type == "mysql":
@@ -1637,11 +1644,13 @@ class DatabaseManager:
             if self.db_type == "mysql":
                 self.connection.commit()
             
-            self.logger.info(f"Updated Martingale lane {lane_id} with trade {trade_id} - Level {current_level}, Amount ${trade_amount}")
+            self.logger.info(f"Successfully updated Martingale lane {lane_id} with trade {trade_id} - Level {current_level}→{next_level}, Amount ${trade_amount}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to update Martingale lane: {e}")
+            self.logger.error(f"Failed to update Martingale lane {lane_id}: {e}")
+            import traceback
+            self.logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
     
     def complete_martingale_lane(self, lane_id: str) -> bool:

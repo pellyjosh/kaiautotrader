@@ -25,7 +25,7 @@ class MartingaleLane:
         self.base_amount = base_amount
         self.multiplier = multiplier
         self.max_level = max_level
-        self.current_level = current_level
+        self.current_level = current_level  # Start at 1 for first Martingale level
         self.current_amount = base_amount * (multiplier ** (current_level - 1))
         self.total_invested = 0.0
         self.total_potential_payout = 0.0
@@ -37,7 +37,10 @@ class MartingaleLane:
     
     def get_next_trade_amount(self) -> float:
         """Get the amount for the next trade in this lane"""
-        return self.base_amount * (self.multiplier ** self.current_level)
+        # Level 1 = base_amount * multiplier^0 = base_amount
+        # Level 2 = base_amount * multiplier^1 = base_amount * multiplier
+        # Level 3 = base_amount * multiplier^2, etc.
+        return self.base_amount * (self.multiplier ** (self.current_level - 1))
     
     def can_continue(self) -> bool:
         """Check if this lane can continue (hasn't exceeded max level)"""
@@ -230,9 +233,9 @@ class EnhancedMartingaleManager:
         
         if lane:
             # Assign to existing lane - calculate next trade amount
-            next_level = lane['current_level'] + 1
-            next_amount = lane['base_amount'] * (lane['multiplier'] ** (next_level - 1))
-            self._log(f"[{account_name}] Assigned to existing lane {lane['lane_id']}: ${next_amount} (Next Level {next_level})", "INFO")
+            # Use the lane's get_next_trade_amount method for consistency
+            next_amount = lane['base_amount'] * (lane['multiplier'] ** (lane['current_level'] - 1))
+            self._log(f"[{account_name}] Assigned to existing lane {lane['lane_id']}: ${next_amount} (Level {lane['current_level']})", "INFO")
             return next_amount, lane['lane_id']
         else:
             # No existing lanes or auto-create disabled - use base amount
@@ -292,6 +295,9 @@ class EnhancedMartingaleManager:
                           amount: float, lane_id: str = None, expected_payout: float = 0.0) -> bool:
         """Handle when a trade is placed - update lane state"""
         with self.lock:
+            # Debug logging for trade registration
+            self._log(f"Registering trade {trade_id} for {account_name} (Symbol: {symbol}, Amount: ${amount}, Lane: {lane_id})", "DEBUG")
+            
             # Mark account as having active trade
             self.active_trades_per_account[account_name] = True
             
@@ -304,24 +310,37 @@ class EnhancedMartingaleManager:
                 'timestamp': time.time()
             }
             
+            self._log(f"Now tracking {len(self.pending_trade_results)} pending trades: {list(self.pending_trade_results.keys())}", "DEBUG")
+            
             if lane_id and self.db_manager:
+                # Debug: Log lane update attempt
+                self._log(f"[{account_name}] Attempting to update lane {lane_id} with trade {trade_id} (Amount: ${amount})", "DEBUG")
+                
                 # Update the lane with new trade
                 success = self.db_manager.update_martingale_lane_on_trade(
                     lane_id, trade_id, amount, expected_payout
                 )
                 if success:
                     self._invalidate_cache()  # Refresh cache
-                    self._log(f"[{account_name}] Updated lane {lane_id} with trade {trade_id}", "INFO")
+                    self._log(f"[{account_name}] Successfully updated lane {lane_id} with trade {trade_id}", "INFO")
                 else:
-                    self._log(f"[{account_name}] Failed to update lane {lane_id}", "ERROR")
+                    self._log(f"[{account_name}] Failed to update lane {lane_id} with trade {trade_id}", "ERROR")
                 
                 return success
+            elif lane_id:
+                self._log(f"[{account_name}] Cannot update lane {lane_id} - no database manager", "ERROR")
+            else:
+                self._log(f"[{account_name}] No lane ID provided for trade {trade_id} - base trade", "DEBUG")
             
             return True
     
     def handle_trade_result(self, trade_id: str, result: str, profit_loss: float = 0.0) -> bool:
         """Handle trade result and update Martingale state"""
         with self.lock:
+            # Debug logging for trade tracking
+            self._log(f"Handling trade result for {trade_id}: {result} (P&L: ${profit_loss})", "DEBUG")
+            self._log(f"Currently tracking {len(self.pending_trade_results)} pending trades: {list(self.pending_trade_results.keys())}", "DEBUG")
+            
             if trade_id not in self.pending_trade_results:
                 self._log(f"Trade {trade_id} not found in pending results", "WARNING")
                 return False
@@ -390,9 +409,9 @@ class EnhancedMartingaleManager:
                 return True
         else:
             # Base trade loss - create new lane if auto-create is enabled
-            return self._create_new_lane_for_loss(account_name, symbol, account_settings)
+            return self._create_new_lane_for_loss(account_name, symbol, account_settings, trade_id, amount)
     
-    def _create_new_lane_for_loss(self, account_name: str, symbol: str, account_settings: Dict) -> bool:
+    def _create_new_lane_for_loss(self, account_name: str, symbol: str, account_settings: Dict, failed_trade_id: str = None, failed_amount: float = 0.0) -> bool:
         """Create a new Martingale lane after a base trade loss"""
         if not self.db_manager:
             return False
@@ -422,6 +441,16 @@ class EnhancedMartingaleManager:
         )
         
         if lane_id:
+            # Record the failed trade that triggered this lane creation
+            if failed_trade_id and failed_amount > 0:
+                success = self.db_manager.update_martingale_lane_on_trade(
+                    lane_id, failed_trade_id, failed_amount, 0.0  # No payout for failed trade
+                )
+                if success:
+                    self._log(f"[{account_name}] Recorded failed trade {failed_trade_id} (${failed_amount}) in new lane {lane_id}", "INFO")
+                else:
+                    self._log(f"[{account_name}] Failed to record failed trade in new lane {lane_id}", "WARNING")
+            
             self._invalidate_cache()
             self._log(f"[{account_name}] Created new Martingale lane {lane_id} for {symbol}", "INFO")
             return True
