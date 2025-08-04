@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Account - HuboluxTradingBot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .account-form {
+        background: rgba(17, 17, 17, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-primary);
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .form-label {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
+    }
+
+    .form-control {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        padding: 0.75rem;
+        transition: var(--transition-fast);
+    }
+
+    .form-control:focus {
+        background: var(--bg-secondary);
+        border-color: var(--text-success);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 0.2rem rgba(0, 255, 136, 0.25);
+    }
+
+    .form-control::placeholder {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .btn-save {
+        background: linear-gradient(135deg, var(--text-success), #00cc66);
+        border: none;
+        color: var(--bg-primary);
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: var(--transition-fast);
+    }
+
+    .btn-save:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+        opacity: 0.9;
+        color: var(--bg-primary);
+    }
+
+    .btn-cancel {
+        background: transparent;
+        border: 1px solid var(--border-primary);
+        color: var(--text-secondary);
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: var(--transition-fast);
+        text-decoration: none;
+    }
+
+    .btn-cancel:hover {
+        border-color: var(--text-warning);
+        color: var(--text-warning);
+        text-decoration: none;
+    }
+
+    .form-switch .form-check-input {
+        background-color: var(--bg-secondary);
+        border-color: var(--border-primary);
+    }
+
+    .form-switch .form-check-input:checked {
+        background-color: var(--text-success);
+        border-color: var(--text-success);
+    }
+
+    .form-switch .form-check-input:focus {
+        box-shadow: 0 0 0 0.2rem rgba(0, 255, 136, 0.25);
+    }
+
+    .form-check-label {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-weight: 500;
+    }
+
+    .alert {
+        background: rgba(255, 68, 68, 0.1);
+        border: 1px solid var(--text-error);
+        color: var(--text-error);
+        border-radius: 6px;
+        font-family: var(--font-mono);
+    }
+
+    .account-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .account-header h1 {
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .account-header p {
+        color: var(--text-secondary);
+        font-size: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="account-header">
+        <h1><i class="fas fa-edit me-2"></i>Edit Account</h1>
+        <p>Update account settings and configuration</p>
+    </div>
+
+    <div class="account-form">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            {% for message in messages %}
+            <i class="fas fa-exclamation-triangle me-2"></i>{{ message }}
+            {% endfor %}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('accounts.edit_account', account_id=account.id) }}">
+            <div class="mb-3">
+                <label for="account_name" class="form-label">
+                    <i class="fas fa-user me-2"></i>Account Name
+                </label>
+                <input type="text" class="form-control" id="account_name" name="account_name"
+                    value="{{ account.account_name }}" required placeholder="Enter account display name">
+            </div>
+
+            <div class="mb-3">
+                <label for="email" class="form-label">
+                    <i class="fas fa-envelope me-2"></i>Email Address
+                </label>
+                <input type="email" class="form-control" id="email" name="email" value="{{ account.email }}" required
+                    placeholder="Enter email address">
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">
+                    <i class="fas fa-key me-2"></i>Password
+                </label>
+                <input type="password" class="form-control" id="password" name="password" value="{{ account.password }}"
+                    required placeholder="Enter account password">
+            </div>
+
+            <div class="mb-3">
+                <label for="balance" class="form-label">
+                    <i class="fas fa-dollar-sign me-2"></i>Balance
+                </label>
+                <input type="number" class="form-control" id="balance" name="balance" value="{{ account.balance }}"
+                    step="0.01" min="0" placeholder="Enter account balance">
+            </div>
+
+            <div class="mb-4">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" {% if
+                        account.is_active %}checked{% endif %}>
+                    <label class="form-check-label" for="is_active">
+                        <i class="fas fa-power-off me-2"></i>Account Active
+                    </label>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between flex-wrap gap-2">
+                <a href="{{ url_for('accounts.list_accounts') }}" class="btn-cancel">
+                    <i class="fas fa-arrow-left me-2"></i>Cancel
+                </a>
+                <button type="submit" class="btn-save">
+                    <i class="fas fa-save me-2"></i>Update Account
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Form validation and UX enhancements
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.querySelector('form');
+        const submitBtn = document.querySelector('.btn-save');
+
+        form.addEventListener('submit', function (e) {
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Updating...';
+            submitBtn.disabled = true;
+        });
+
+        // Real-time validation feedback
+        const inputs = document.querySelectorAll('.form-control');
+        inputs.forEach(input => {
+            input.addEventListener('input', function () {
+                if (this.checkValidity()) {
+                    this.style.borderColor = 'var(--text-success)';
+                } else {
+                    this.style.borderColor = 'var(--text-error)';
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

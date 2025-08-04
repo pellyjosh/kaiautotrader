@@ -1,0 +1,736 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - HuboluxTradingBot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .profile-container {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 2rem 0;
+    }
+
+    .terminal-header {
+        background: rgba(0, 0, 0, 0.95);
+        border: 2px solid #00ff88;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 2rem;
+        font-family: var(--font-mono);
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+    }
+
+    .terminal-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, #00ff88, #00aaff, #ff0088, #ffaa00);
+        animation: terminal-glow 3s ease-in-out infinite alternate;
+    }
+
+    @keyframes terminal-glow {
+        0% {
+            opacity: 0.8;
+        }
+
+        100% {
+            opacity: 1;
+        }
+    }
+
+    .terminal-prompt {
+        color: #00ff88;
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .terminal-content {
+        color: #ffffff;
+        line-height: 1.6;
+    }
+
+    .profile-avatar {
+        width: 100px;
+        height: 100px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #00ff88, #00aaff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #000000;
+        font-size: 2.5rem;
+        font-weight: 900;
+        font-family: var(--font-mono);
+        margin-right: 2rem;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+        border: 2px solid #00ff88;
+    }
+
+    .profile-info h1 {
+        color: #00ff88;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .profile-badge {
+        background: rgba(0, 255, 136, 0.2);
+        border: 1px solid #00ff88;
+        color: #00ff88;
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-right: 1rem;
+    }
+
+    .profile-meta {
+        color: #666666;
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-terminal {
+        background: rgba(0, 0, 0, 0.95);
+        border: 1px solid #333333;
+        border-radius: 8px;
+        padding: 1.5rem;
+        position: relative;
+        transition: all 0.3s ease;
+        font-family: var(--font-mono);
+    }
+
+    .stat-terminal:hover {
+        border-color: #00ff88;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+        transform: translateY(-2px);
+    }
+
+    .stat-terminal::before {
+        content: '>';
+        position: absolute;
+        top: 1rem;
+        left: 1rem;
+        color: #00ff88;
+        font-weight: 600;
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 900;
+        color: #00ff88;
+        font-family: var(--font-mono);
+        margin: 0.5rem 0 0.5rem 1.5rem;
+        text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    }
+
+    .stat-label {
+        color: #ffffff;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-left: 1.5rem;
+    }
+
+    .terminal-section {
+        background: rgba(0, 0, 0, 0.95);
+        border: 1px solid #333333;
+        border-radius: 8px;
+        margin-bottom: 2rem;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .terminal-section:hover {
+        border-color: #00ff88;
+        box-shadow: 0 0 30px rgba(0, 255, 136, 0.2);
+    }
+
+    .terminal-titlebar {
+        background: #111111;
+        border-bottom: 1px solid #333333;
+        padding: 0.75rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .terminal-dots {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .terminal-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+    }
+
+    .terminal-dot.red {
+        background: #ff4444;
+    }
+
+    .terminal-dot.yellow {
+        background: #ffaa00;
+    }
+
+    .terminal-dot.green {
+        background: #00ff88;
+    }
+
+    .terminal-title {
+        color: #00ff88;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-left: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .terminal-body {
+        padding: 2rem;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #00ff88;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 600;
+    }
+
+    .form-label::before {
+        content: '$ ';
+        color: #00ff88;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: rgba(17, 17, 17, 0.95);
+        border: 1px solid #333333;
+        border-radius: 4px;
+        color: #ffffff;
+        font-family: var(--font-mono);
+        transition: all 0.3s ease;
+        font-size: 0.9rem;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #00ff88;
+        background: rgba(0, 0, 0, 0.95);
+        box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+    }
+
+    .form-control::placeholder {
+        color: #666666;
+        font-style: italic;
+    }
+
+    .form-control[readonly] {
+        background: rgba(26, 26, 26, 0.95);
+        color: #999999;
+        cursor: not-allowed;
+    }
+
+    .btn-terminal {
+        background: linear-gradient(135deg, #00ff88, #00aaff);
+        border: none;
+        color: #000000;
+        padding: 0.75rem 2rem;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+    }
+
+    .btn-terminal:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+        filter: brightness(1.1);
+    }
+
+    .btn-terminal:active {
+        transform: translateY(0);
+    }
+
+    .security-notice {
+        background: rgba(255, 170, 0, 0.1);
+        border: 1px solid #ffaa00;
+        border-radius: 4px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+    }
+
+    .security-notice::before {
+        content: '[WARNING] ';
+        color: #ffaa00;
+        font-weight: 600;
+    }
+
+    .password-strength {
+        margin-top: 0.5rem;
+    }
+
+    .strength-bar {
+        height: 4px;
+        background: #333333;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 0.25rem;
+    }
+
+    .strength-fill {
+        height: 100%;
+        transition: all 0.3s ease;
+        border-radius: 2px;
+    }
+
+    .strength-weak {
+        background: #ff4444;
+        width: 25%;
+    }
+
+    .strength-fair {
+        background: #ffaa00;
+        width: 50%;
+    }
+
+    .strength-good {
+        background: #00aaff;
+        width: 75%;
+    }
+
+    .strength-strong {
+        background: #00ff88;
+        width: 100%;
+    }
+
+    .strength-text {
+        font-size: 0.8rem;
+        color: #666666;
+        font-family: var(--font-mono);
+    }
+
+    .command-line {
+        background: rgba(0, 0, 0, 0.95);
+        border: 1px solid #333333;
+        border-radius: 4px;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+    }
+
+    .command-prompt {
+        color: #00ff88;
+    }
+
+    .command-output {
+        color: #ffffff;
+        margin-left: 2rem;
+    }
+
+    @media (max-width: 768px) {
+        .profile-info {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .profile-avatar {
+            margin-right: 0;
+            margin-bottom: 1rem;
+        }
+
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+    }
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <!-- Terminal Header -->
+    <div class="terminal-header">
+        <div class="terminal-prompt">user@hubolux-system:~$ whoami</div>
+        <div class="terminal-content">
+            <div class="d-flex align-items-center">
+                <div class="profile-avatar">
+                    {{ session.get('username', 'U')[0].upper() }}
+                </div>
+                <div class="profile-info">
+                    <h1>{{ session.get('username', 'Unknown User') }}</h1>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <span class="profile-badge">
+                            {{ 'ADMIN' if session.get('is_admin') else 'USER' }}
+                        </span>
+                        <span class="profile-badge">ACTIVE</span>
+                    </div>
+                    <div class="profile-meta">
+                        <span>→ Access Level: {{ 'ROOT' if session.get('is_admin') else 'STANDARD' }}</span><br>
+                        <span>→ Session: {{ session.get('created_at', 'UNKNOWN') }}</span><br>
+                        <span>→ Terminal: HUBOLUX_DARKWEB_TERMINAL</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Stats -->
+    <div class="command-line mb-4">
+        <div class="command-prompt">user@hubolux-system:~$ system-stats --user {{ session.get('username', 'unknown') }}
+        </div>
+        <div class="command-output">Loading user statistics...</div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-terminal">
+            <div class="stat-value">{{ accounts|length if accounts else 0 }}</div>
+            <div class="stat-label">ACTIVE_ACCOUNTS</div>
+        </div>
+        <div class="stat-terminal">
+            <div class="stat-value">99.9%</div>
+            <div class="stat-label">SYSTEM_UPTIME</div>
+        </div>
+        <div class="stat-terminal">
+            <div class="stat-value">1,337</div>
+            <div class="stat-label">TOTAL_TRADES</div>
+        </div>
+        <div class="stat-terminal">
+            <div class="stat-value">88.7%</div>
+            <div class="stat-label">SUCCESS_RATE</div>
+        </div>
+    </div>
+
+    <!-- Profile Information Section -->
+    <div class="terminal-section">
+        <div class="terminal-titlebar">
+            <div class="terminal-dots">
+                <div class="terminal-dot red"></div>
+                <div class="terminal-dot yellow"></div>
+                <div class="terminal-dot green"></div>
+            </div>
+            <div class="terminal-title">Profile Configuration</div>
+        </div>
+        <div class="terminal-body">
+            <form method="POST" action="{{ url_for('main.profile') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="username">Username</label>
+                        <input type="text" class="form-control" id="username" name="username"
+                            value="{{ session.get('username', '') }}" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="email">Email Address</label>
+                        <input type="email" class="form-control" id="email" name="email"
+                            value="{{ user.email if user else '' }}" placeholder="trader@hubolux.terminal">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="first_name">First Name</label>
+                        <input type="text" class="form-control" id="first_name" name="first_name"
+                            value="{{ user.first_name if user else '' }}" placeholder="Enter first name">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="last_name">Last Name</label>
+                        <input type="text" class="form-control" id="last_name" name="last_name"
+                            value="{{ user.last_name if user else '' }}" placeholder="Enter last name">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="timezone">System Timezone</label>
+                    <select class="form-control" id="timezone" name="timezone">
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="America/New_York">Eastern Time (ET)</option>
+                        <option value="America/Chicago">Central Time (CT)</option>
+                        <option value="America/Denver">Mountain Time (MT)</option>
+                        <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                        <option value="Europe/London">London (GMT)</option>
+                        <option value="Asia/Tokyo">Tokyo (JST)</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn-terminal">
+                    <i class="fas fa-save me-2"></i>UPDATE PROFILE
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Security Section -->
+    <div class="terminal-section">
+        <div class="terminal-titlebar">
+            <div class="terminal-dots">
+                <div class="terminal-dot red"></div>
+                <div class="terminal-dot yellow"></div>
+                <div class="terminal-dot green"></div>
+            </div>
+            <div class="terminal-title">Security Configuration</div>
+        </div>
+        <div class="terminal-body">
+            <div class="security-notice">
+                Changing your password will require re-authentication across all active sessions.
+            </div>
+
+            <form method="POST" action="{{ url_for('auth.change_password') }}" id="passwordForm">
+                <div class="form-group">
+                    <label class="form-label" for="current_password">Current Password</label>
+                    <input type="password" class="form-control" id="current_password" name="current_password"
+                        placeholder="Enter current authentication key">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="new_password">New Password</label>
+                        <input type="password" class="form-control" id="new_password" name="new_password"
+                            placeholder="Enter new authentication key">
+                        <div class="password-strength">
+                            <div class="strength-bar">
+                                <div class="strength-fill" id="strengthFill"></div>
+                            </div>
+                            <div class="strength-text" id="strengthText">Password entropy will be calculated...</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="confirm_password">Confirm Password</label>
+                        <input type="password" class="form-control" id="confirm_password" name="confirm_password"
+                            placeholder="Confirm new authentication key">
+                        <div id="passwordMatch" class="strength-text" style="margin-top: 0.5rem;"></div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-terminal">
+                    <i class="fas fa-lock me-2"></i>UPDATE SECURITY
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- System Commands -->
+    <div class="command-line">
+        <div class="command-prompt">user@hubolux-system:~$ profile --status</div>
+        <div class="command-output">
+            → Profile Status: ACTIVE<br>
+            → Last Modified: {{ "now"|date:"Y-m-d H:i:s" }}<br>
+            → Security Level: {{ 'MAXIMUM' if session.get('is_admin') else 'STANDARD' }}<br>
+            → Session Expires: NEVER
+        </div>
+    </div>
+</div>
+{% endblock %}
+</style>
+{% endblock %}
+
+{% block content %}
+}
+</style>
+{% endblock %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const newPasswordInput = document.getElementById('new_password');
+        const confirmPasswordInput = document.getElementById('confirm_password');
+        const strengthFill = document.getElementById('strengthFill');
+        const strengthText = document.getElementById('strengthText');
+        const passwordMatch = document.getElementById('passwordMatch');
+
+        // Password strength checker
+        newPasswordInput.addEventListener('input', function () {
+            const password = this.value;
+            const strength = checkPasswordStrength(password);
+
+            // Remove existing strength classes
+            strengthFill.className = 'strength-fill';
+
+            if (password.length === 0) {
+                strengthText.textContent = 'Password entropy will be calculated...';
+                return;
+            }
+
+            switch (strength.level) {
+                case 1:
+                    strengthFill.classList.add('strength-weak');
+                    strengthText.textContent = '[WEAK] Password entropy: LOW - Vulnerability detected';
+                    break;
+                case 2:
+                    strengthFill.classList.add('strength-fair');
+                    strengthText.textContent = '[FAIR] Password entropy: MEDIUM - Acceptable security';
+                    break;
+                case 3:
+                    strengthFill.classList.add('strength-good');
+                    strengthText.textContent = '[GOOD] Password entropy: HIGH - Strong security';
+                    break;
+                case 4:
+                    strengthFill.classList.add('strength-strong');
+                    strengthText.textContent = '[STRONG] Password entropy: MAXIMUM - Military grade';
+                    break;
+            }
+        });
+
+        // Password confirmation checker
+        function checkPasswordMatch() {
+            const newPassword = newPasswordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+
+            if (confirmPassword.length === 0) {
+                passwordMatch.textContent = '';
+                return;
+            }
+
+            if (newPassword === confirmPassword) {
+                passwordMatch.textContent = '[MATCH] Authentication keys synchronized';
+                passwordMatch.style.color = '#00ff88';
+            } else {
+                passwordMatch.textContent = '[ERROR] Authentication keys do not match';
+                passwordMatch.style.color = '#ff4444';
+            }
+        }
+
+        confirmPasswordInput.addEventListener('input', checkPasswordMatch);
+        newPasswordInput.addEventListener('input', checkPasswordMatch);
+
+        function checkPasswordStrength(password) {
+            let score = 0;
+
+            if (password.length >= 8) score++;
+            if (password.match(/[a-z]/)) score++;
+            if (password.match(/[A-Z]/)) score++;
+            if (password.match(/[0-9]/)) score++;
+            if (password.match(/[^a-zA-Z0-9]/)) score++;
+
+            return {
+                level: Math.min(4, Math.max(1, score - 1)),
+                score: score
+            };
+        }
+
+        // Terminal typing effect for commands
+        function typeCommand(element, text, speed = 50) {
+            let i = 0;
+            element.innerHTML = '';
+            const timer = setInterval(() => {
+                if (i < text.length) {
+                    element.innerHTML += text.charAt(i);
+                    i++;
+                } else {
+                    clearInterval(timer);
+                }
+            }, speed);
+        }
+
+        // Add some terminal flair
+        setTimeout(() => {
+            const outputs = document.querySelectorAll('.command-output');
+            outputs.forEach((output, index) => {
+                setTimeout(() => {
+                    output.style.opacity = '1';
+                }, index * 200);
+            });
+        }, 1000);
+    });
+
+    // Form submission with terminal feedback
+    function updatePassword() {
+        const currentPassword = document.getElementById('current_password').value;
+        const newPassword = document.getElementById('new_password').value;
+        const confirmPassword = document.getElementById('confirm_password').value;
+
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            showTerminalMessage('[ERROR] All authentication fields required', 'error');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            showTerminalMessage('[ERROR] Authentication key mismatch detected', 'error');
+            return;
+        }
+
+        if (newPassword.length < 8) {
+            showTerminalMessage('[ERROR] Minimum 8-character authentication key required', 'error');
+            return;
+        }
+
+        showTerminalMessage('[INFO] Security update initiated...', 'info');
+    }
+
+    function showTerminalMessage(message, type = 'info') {
+        const commandLine = document.createElement('div');
+        commandLine.className = 'command-line';
+
+        let color = '#00ff88';
+        if (type === 'error') color = '#ff4444';
+        if (type === 'warning') color = '#ffaa00';
+
+        commandLine.innerHTML = `
+            <div class="command-prompt">system@hubolux:~$ echo "${message}"</div>
+            <div class="command-output" style="color: ${color};">${message}</div>
+        `;
+
+        const container = document.querySelector('.profile-container');
+        container.appendChild(commandLine);
+
+        setTimeout(() => {
+            commandLine.remove();
+        }, 5000);
+    }
+</script>
+{% endblock %}

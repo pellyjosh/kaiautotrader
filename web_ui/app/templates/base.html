@@ -27,77 +27,99 @@
 
 <body>
     {% if session.get('is_authenticated') %}
-    <div class="main-layout">
-        <!-- Header Navigation -->
-        <nav class="navbar navbar-expand-lg header-nav">
-            <div class="container-fluid">
-                <a class="navbar-brand brand-logo" href="{{ url_for('main.dashboard') }}">
-                    <i class="fas fa-robot"></i>
-                    HuboluxTradingBot
-                </a>
-
-                <div class="d-flex align-items-center gap-3">
-                    <span class="status-indicator status-online">
-                        <i class="fas fa-circle"></i>
-                        ONLINE
-                    </span>
-
-                    <div class="terminal-mini d-none d-md-block">
-                        <span style="color: var(--accent-primary);">user@hubolux:~$</span>
-                        <span style="color: var(--text-primary);">status</span>
-                    </div>
-
-                    <!-- Mobile Sidebar Toggle -->
-                    <button class="btn btn-outline-primary mobile-sidebar-toggle" type="button"
-                        data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
-                        <i class="fas fa-bars"></i>
-                    </button>
-
-                    <!-- User Menu -->
-                    <div class="dropdown user-menu">
-                        <div class="user-avatar" data-bs-toggle="dropdown" aria-expanded="false">
-                            {{ session.get('username', 'U')[0].upper() }}
-                        </div>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li>
-                                <h6 class="dropdown-header">{{ session.get('username', 'Unknown') }}</h6>
-                            </li>
-                            <li>
-                                <hr class="dropdown-divider">
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="{{ url_for('auth.profile') }}">
-                                    <i class="fas fa-user me-2"></i> Profile
-                                </a>
-                            </li>
-                            {% if session.get('role') == 'admin' %}
-                            <li>
-                                <a class="dropdown-item" href="{{ url_for('admin.dashboard') }}">
-                                    <i class="fas fa-cogs me-2"></i> Admin Panel
-                                </a>
-                            </li>
-                            {% endif %}
-                            <li>
-                                <hr class="dropdown-divider">
-                            </li>
-                            <li>
-                                <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
-                                    <i class="fas fa-sign-out-alt me-2"></i> Logout
-                                </a>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
+    <!-- Full Screen Terminal Interface -->
+    <div class="terminal-interface">
+        <!-- Terminal Header Bar -->
+        <div class="terminal-header-bar">
+            <div class="terminal-window-controls">
+                <div class="window-dot red"></div>
+                <div class="window-dot yellow"></div>
+                <div class="window-dot green"></div>
             </div>
-        </nav>
+            
+            <div class="terminal-title-bar">
+                <span class="terminal-title">HUBOLUX_DARKWEB_TERMINAL</span>
+                <span class="terminal-path">~/{{ request.endpoint or 'dashboard' }}</span>
+            </div>
+            
+            <div class="terminal-status-bar">
+                <span class="status-badge online">
+                    <i class="fas fa-circle"></i> ONLINE
+                </span>
+                <span class="user-badge">
+                    [{{ session.get('username', 'USER').upper() }}]
+                </span>
+            </div>
+        </div>
 
-        <div class="d-flex">
-            <!-- Sidebar -->
-            <div class="offcanvas-lg offcanvas-start sidebar" tabindex="-1" id="sidebar" aria-labelledby="sidebarLabel">
-                <div class="offcanvas-header d-lg-none">
-                    <h5 class="offcanvas-title" id="sidebarLabel">Navigation</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"
-                        data-bs-target="#sidebar" aria-label="Close"></button>
+        <!-- Terminal Navigation Menu -->
+        <div class="terminal-nav-bar">
+            <div class="nav-prompt">
+                <span class="prompt-user">{{ session.get('username', 'user') }}@hubolux-system</span>
+                <span class="prompt-separator">:</span>
+                <span class="prompt-path">~</span>
+                <span class="prompt-symbol">$</span>
+            </div>
+            
+            <div class="nav-commands">
+                <a href="{{ url_for('main.dashboard') }}" class="nav-command {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
+                    dashboard
+                </a>
+                <a href="{{ url_for('accounts.list_accounts') }}" class="nav-command {% if 'accounts' in request.endpoint %}active{% endif %}">
+                    accounts
+                </a>
+                {% if session.get('is_admin') %}
+                <a href="{{ url_for('admin.users') }}" class="nav-command {% if 'admin' in request.endpoint %}active{% endif %}">
+                    admin
+                </a>
+                {% endif %}
+                <a href="{{ url_for('main.profile') }}" class="nav-command {% if request.endpoint == 'main.profile' %}active{% endif %}">
+                    profile
+                </a>
+                <a href="{{ url_for('auth.logout') }}" class="nav-command logout">
+                    logout
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="terminal-content">
+            <div class="content-wrapper">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+
+        <!-- Terminal Footer -->
+        <div class="terminal-footer">
+            <div class="system-status">
+                <span class="status-item">
+                    <i class="fas fa-server"></i>
+                    <span class="status-label">SERVER:</span>
+                    <span class="status-value online">ONLINE</span>
+                </span>
+                <span class="status-item">
+                    <i class="fas fa-robot"></i>
+                    <span class="status-label">BOT:</span>
+                    <span class="status-value active">ACTIVE</span>
+                </span>
+                <span class="status-item">
+                    <i class="fas fa-chart-line"></i>
+                    <span class="status-label">TRADES:</span>
+                    <span class="status-value monitoring">MONITORING</span>
+                </span>
+                <span class="status-item">
+                    <i class="fas fa-shield-alt"></i>
+                    <span class="status-label">SECURITY:</span>
+                    <span class="status-value encrypted">ENCRYPTED</span>
+                </span>
+            </div>
+            
+            <div class="terminal-info">
+                <span class="terminal-version">HuboluxTradingBot v2.0.1</span>
+                <span class="terminal-time" id="terminalTime"></span>
+            </div>
+        </div>
+    </div>
                 </div>
                 <div class="offcanvas-body p-0">
                     <!-- Trading Section -->
@@ -285,6 +307,25 @@
                 }, 200);
             }
         }, 3000);
+
+        // Update terminal time every second
+        function updateTerminalTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            const terminalTimeElement = document.getElementById('terminalTime');
+            if (terminalTimeElement) {
+                terminalTimeElement.textContent = timeString;
+            }
+        }
+
+        // Initialize terminal time
+        updateTerminalTime();
+        setInterval(updateTerminalTime, 1000);
     </script>
 
     {% block scripts %}{% endblock %}

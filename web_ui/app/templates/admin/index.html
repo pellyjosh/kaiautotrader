@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - HuboluxTradingBot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .admin-container {
+        padding: 2rem 0;
+    }
+
+    .admin-header {
+        text-align: center;
+        margin-bottom: 3rem;
+    }
+
+    .admin-header h1 {
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .admin-header p {
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+    }
+
+    .admin-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin-bottom: 3rem;
+    }
+
+    .admin-card {
+        background: rgba(17, 17, 17, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-primary);
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        transition: var(--transition-normal);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .admin-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--text-info), var(--text-success), var(--text-warning), var(--text-error));
+        opacity: 0;
+        transition: var(--transition-fast);
+    }
+
+    .admin-card:hover {
+        transform: translateY(-5px);
+        border-color: var(--text-info);
+        box-shadow: 0 10px 30px rgba(0, 136, 255, 0.3);
+    }
+
+    .admin-card:hover::before {
+        opacity: 1;
+    }
+
+    .card-icon {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 1.5rem;
+        background: linear-gradient(135deg, var(--text-info), var(--text-success));
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        color: var(--bg-primary);
+        position: relative;
+    }
+
+    .admin-card:nth-child(2) .card-icon {
+        background: linear-gradient(135deg, var(--text-success), var(--text-warning));
+    }
+
+    .admin-card:nth-child(3) .card-icon {
+        background: linear-gradient(135deg, var(--text-warning), var(--text-error));
+    }
+
+    .admin-card:nth-child(4) .card-icon {
+        background: linear-gradient(135deg, var(--text-error), var(--text-info));
+    }
+
+    .card-title {
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 1.3rem;
+        margin-bottom: 1rem;
+    }
+
+    .card-description {
+        color: var(--text-secondary);
+        margin-bottom: 2rem;
+        line-height: 1.6;
+    }
+
+    .card-action {
+        background: linear-gradient(135deg, var(--text-info), var(--text-success));
+        border: none;
+        color: var(--bg-primary);
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: var(--transition-fast);
+        text-decoration: none;
+        display: inline-block;
+    }
+
+    .card-action:hover {
+        opacity: 0.9;
+        color: var(--bg-primary);
+        text-decoration: none;
+        transform: translateY(-2px);
+    }
+
+    .admin-card:nth-child(2) .card-action {
+        background: linear-gradient(135deg, var(--text-success), var(--text-warning));
+    }
+
+    .admin-card:nth-child(3) .card-action {
+        background: linear-gradient(135deg, var(--text-warning), var(--text-error));
+    }
+
+    .admin-card:nth-child(4) .card-action {
+        background: linear-gradient(135deg, var(--text-error), var(--text-info));
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 3rem;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        font-family: var(--font-mono);
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .stat-label {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .recent-activity {
+        background: rgba(17, 17, 17, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-primary);
+        border-radius: 12px;
+        padding: 2rem;
+    }
+
+    .activity-header {
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 1.3rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .activity-item {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border-primary);
+    }
+
+    .activity-item:last-child {
+        border-bottom: none;
+    }
+
+    .activity-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--bg-secondary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-info);
+    }
+
+    .activity-content {
+        flex: 1;
+    }
+
+    .activity-title {
+        color: var(--text-primary);
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+
+    .activity-time {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid admin-container">
+    <div class="admin-header">
+        <h1><i class="fas fa-shield-alt me-2"></i>Admin Control Panel</h1>
+        <p>Manage your HuboluxTradingBot system from this central dashboard</p>
+    </div>
+
+    <!-- System Stats -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_users if stats and stats.total_users else '0' }}</div>
+            <div class="stat-label">Total Users</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.active_accounts if stats and stats.active_accounts else '0' }}</div>
+            <div class="stat-label">Active Accounts</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_trades if stats and stats.total_trades else '0' }}</div>
+            <div class="stat-label">Total Trades</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">
+                {% if bot_status and bot_status.get('status') == 'running' %}
+                <span style="color: var(--text-success);">Online</span>
+                {% else %}
+                <span style="color: var(--text-error);">Offline</span>
+                {% endif %}
+            </div>
+            <div class="stat-label">Bot Status</div>
+        </div>
+    </div>
+
+    <!-- Admin Actions -->
+    <div class="admin-grid">
+        <div class="admin-card">
+            <div class="card-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <h3 class="card-title">User Management</h3>
+            <p class="card-description">
+                Manage user accounts, permissions, and access levels.
+                View user activity and system usage statistics.
+            </p>
+            <a href="{{ url_for('admin.users') }}" class="card-action">
+                <i class="fas fa-arrow-right me-2"></i>Manage Users
+            </a>
+        </div>
+
+        <div class="admin-card">
+            <div class="card-icon">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <h3 class="card-title">System Information</h3>
+            <p class="card-description">
+                Monitor system performance, view logs, and check
+                server health and resource usage.
+            </p>
+            <a href="{{ url_for('admin.system_info') }}" class="card-action">
+                <i class="fas fa-arrow-right me-2"></i>View System Info
+            </a>
+        </div>
+
+        <div class="admin-card">
+            <div class="card-icon">
+                <i class="fas fa-wallet"></i>
+            </div>
+            <h3 class="card-title">Account Management</h3>
+            <p class="card-description">
+                Oversee trading accounts, balances, and configurations.
+                Monitor account performance and trading activity.
+            </p>
+            <a href="{{ url_for('accounts.list_accounts') }}" class="card-action">
+                <i class="fas fa-arrow-right me-2"></i>Manage Accounts
+            </a>
+        </div>
+
+        <div class="admin-card">
+            <div class="card-icon">
+                <i class="fas fa-cogs"></i>
+            </div>
+            <h3 class="card-title">Bot Configuration</h3>
+            <p class="card-description">
+                Configure trading bot settings, strategies, and
+                automation parameters for optimal performance.
+            </p>
+            <a href="{{ url_for('main.dashboard') }}" class="card-action">
+                <i class="fas fa-arrow-right me-2"></i>Bot Settings
+            </a>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="recent-activity">
+        <h3 class="activity-header">
+            <i class="fas fa-clock"></i>
+            Recent System Activity
+        </h3>
+
+        <div class="activity-item">
+            <div class="activity-icon">
+                <i class="fas fa-user-plus"></i>
+            </div>
+            <div class="activity-content">
+                <div class="activity-title">New user registration</div>
+                <div class="activity-time">2 hours ago</div>
+            </div>
+        </div>
+
+        <div class="activity-item">
+            <div class="activity-icon">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="activity-content">
+                <div class="activity-title">Trading bot status update</div>
+                <div class="activity-time">3 hours ago</div>
+            </div>
+        </div>
+
+        <div class="activity-item">
+            <div class="activity-icon">
+                <i class="fas fa-chart-bar"></i>
+            </div>
+            <div class="activity-content">
+                <div class="activity-title">Daily trading report generated</div>
+                <div class="activity-time">6 hours ago</div>
+            </div>
+        </div>
+
+        <div class="activity-item">
+            <div class="activity-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="activity-content">
+                <div class="activity-title">System backup completed</div>
+                <div class="activity-time">1 day ago</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Add some interactive animations
+        const cards = document.querySelectorAll('.admin-card');
+
+        cards.forEach(card => {
+            card.addEventListener('mouseenter', function () {
+                this.style.transform = 'translateY(-5px) scale(1.02)';
+            });
+
+            card.addEventListener('mouseleave', function () {
+                this.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+
+        // Auto-refresh system stats every 30 seconds
+        setInterval(function () {
+            // In a real implementation, you'd fetch updated stats here
+            console.log('Refreshing system stats...');
+        }, 30000);
+    });
+</script>
+{% endblock %}

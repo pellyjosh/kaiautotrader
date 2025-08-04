@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+
+{% block title %}Create Account - HuboluxTradingBot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .account-form {
+        background: rgba(17, 17, 17, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-primary);
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .form-label {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
+    }
+
+    .form-control {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        padding: 0.75rem;
+        transition: var(--transition-fast);
+    }
+
+    .form-control:focus {
+        background: var(--bg-secondary);
+        border-color: var(--text-success);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 0.2rem rgba(0, 255, 136, 0.25);
+    }
+
+    .form-control::placeholder {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .btn-create {
+        background: linear-gradient(135deg, var(--text-success), #00cc66);
+        border: none;
+        color: var(--bg-primary);
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: var(--transition-fast);
+        width: 100%;
+    }
+
+    .btn-create:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+        opacity: 0.9;
+        color: var(--bg-primary);
+    }
+
+    .btn-cancel {
+        background: transparent;
+        border: 1px solid var(--border-primary);
+        color: var(--text-secondary);
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: var(--transition-fast);
+        text-decoration: none;
+        width: 100%;
+        text-align: center;
+        display: block;
+        margin-bottom: 1rem;
+    }
+
+    .btn-cancel:hover {
+        border-color: var(--text-warning);
+        color: var(--text-warning);
+        text-decoration: none;
+    }
+
+    .form-switch .form-check-input {
+        background-color: var(--bg-secondary);
+        border-color: var(--border-primary);
+    }
+
+    .form-switch .form-check-input:checked {
+        background-color: var(--text-success);
+        border-color: var(--text-success);
+    }
+
+    .form-switch .form-check-input:focus {
+        box-shadow: 0 0 0 0.2rem rgba(0, 255, 136, 0.25);
+    }
+
+    .form-check-label {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-weight: 500;
+    }
+
+    .alert {
+        background: rgba(255, 68, 68, 0.1);
+        border: 1px solid var(--text-error);
+        color: var(--text-error);
+        border-radius: 6px;
+        font-family: var(--font-mono);
+    }
+
+    .account-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .account-header h1 {
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .account-header p {
+        color: var(--text-secondary);
+        font-size: 1rem;
+    }
+
+    .form-help {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+        font-style: italic;
+    }
+
+    .password-strength {
+        margin-top: 0.5rem;
+    }
+
+    .strength-bar {
+        height: 4px;
+        background: var(--bg-secondary);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 0.25rem;
+    }
+
+    .strength-fill {
+        height: 100%;
+        transition: var(--transition-fast);
+        border-radius: 2px;
+    }
+
+    .strength-weak {
+        background: var(--text-error);
+        width: 25%;
+    }
+
+    .strength-fair {
+        background: var(--text-warning);
+        width: 50%;
+    }
+
+    .strength-good {
+        background: var(--text-info);
+        width: 75%;
+    }
+
+    .strength-strong {
+        background: var(--text-success);
+        width: 100%;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="account-header">
+        <h1><i class="fas fa-user-plus me-2"></i>Create New Account</h1>
+        <p>Add a new trading account to the system</p>
+    </div>
+
+    <div class="account-form">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            {% for message in messages %}
+            <i class="fas fa-exclamation-triangle me-2"></i>{{ message }}
+            {% endfor %}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('accounts.create_account') }}" id="createAccountForm">
+            <div class="mb-3">
+                <label for="account_name" class="form-label">
+                    <i class="fas fa-user me-2"></i>Account Name *
+                </label>
+                <input type="text" class="form-control" id="account_name" name="account_name" required
+                    placeholder="Enter account display name">
+                <div class="form-help">Choose a unique, descriptive name for this trading account</div>
+            </div>
+
+            <div class="mb-3">
+                <label for="email" class="form-label">
+                    <i class="fas fa-envelope me-2"></i>Email Address *
+                </label>
+                <input type="email" class="form-control" id="email" name="email" required
+                    placeholder="Enter email address">
+                <div class="form-help">Must be a valid email address for account notifications</div>
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">
+                    <i class="fas fa-key me-2"></i>Password *
+                </label>
+                <input type="password" class="form-control" id="password" name="password" required
+                    placeholder="Enter a secure password">
+                <div class="password-strength">
+                    <div class="strength-bar">
+                        <div class="strength-fill" id="strengthFill"></div>
+                    </div>
+                    <div class="form-help" id="strengthText">Password strength will be shown here</div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label for="balance" class="form-label">
+                    <i class="fas fa-dollar-sign me-2"></i>Initial Balance
+                </label>
+                <input type="number" class="form-control" id="balance" name="balance" step="0.01" min="0" value="0.00"
+                    placeholder="Enter starting balance">
+                <div class="form-help">Set the initial account balance (can be updated later)</div>
+            </div>
+
+            <div class="mb-4">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
+                    <label class="form-check-label" for="is_active">
+                        <i class="fas fa-power-off me-2"></i>Activate Account Immediately
+                    </label>
+                </div>
+                <div class="form-help">Account will be available for trading when active</div>
+            </div>
+
+            <div class="d-grid gap-2">
+                <a href="{{ url_for('accounts.list_accounts') }}" class="btn-cancel">
+                    <i class="fas fa-arrow-left me-2"></i>Cancel
+                </a>
+                <button type="submit" class="btn-create">
+                    <i class="fas fa-plus me-2"></i>Create Account
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('createAccountForm');
+        const submitBtn = document.querySelector('.btn-create');
+        const passwordInput = document.getElementById('password');
+        const strengthFill = document.getElementById('strengthFill');
+        const strengthText = document.getElementById('strengthText');
+
+        // Form submission handling
+        form.addEventListener('submit', function (e) {
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating...';
+            submitBtn.disabled = true;
+        });
+
+        // Real-time validation feedback
+        const inputs = document.querySelectorAll('.form-control');
+        inputs.forEach(input => {
+            input.addEventListener('input', function () {
+                if (this.checkValidity()) {
+                    this.style.borderColor = 'var(--text-success)';
+                } else {
+                    this.style.borderColor = 'var(--text-error)';
+                }
+            });
+        });
+
+        // Password strength indicator
+        passwordInput.addEventListener('input', function () {
+            const password = this.value;
+            const strength = calculatePasswordStrength(password);
+
+            // Remove existing strength classes
+            strengthFill.className = 'strength-fill';
+
+            if (password.length === 0) {
+                strengthText.textContent = 'Password strength will be shown here';
+                return;
+            }
+
+            switch (strength.level) {
+                case 1:
+                    strengthFill.classList.add('strength-weak');
+                    strengthText.textContent = 'Weak password - consider adding more characters';
+                    break;
+                case 2:
+                    strengthFill.classList.add('strength-fair');
+                    strengthText.textContent = 'Fair password - add special characters for better security';
+                    break;
+                case 3:
+                    strengthFill.classList.add('strength-good');
+                    strengthText.textContent = 'Good password - very secure!';
+                    break;
+                case 4:
+                    strengthFill.classList.add('strength-strong');
+                    strengthText.textContent = 'Strong password - excellent security!';
+                    break;
+            }
+        });
+
+        function calculatePasswordStrength(password) {
+            let score = 0;
+
+            if (password.length >= 8) score++;
+            if (password.match(/[a-z]/)) score++;
+            if (password.match(/[A-Z]/)) score++;
+            if (password.match(/[0-9]/)) score++;
+            if (password.match(/[^a-zA-Z0-9]/)) score++;
+
+            return {
+                level: Math.min(4, Math.max(1, score - 1)),
+                score: score
+            };
+        }
+    });
+</script>
+{% endblock %}
