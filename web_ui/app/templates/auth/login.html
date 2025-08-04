@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Terminal - HuboluxTradingBot</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Dark Tech Theme -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dark-tech.css') }}">
+
+    <style>
+        body {
+            background: radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(0, 136, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(255, 0, 136, 0.05) 0%, transparent 50%),
+                var(--bg-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .matrix-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.1;
+        }
+
+        .login-container {
+            background: rgba(17, 17, 17, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            z-index: 10;
+            animation: slideIn 0.8s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .logo {
+            font-family: var(--font-mono);
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        .terminal-window {
+            background: #000000;
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            background: var(--bg-secondary);
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot:nth-child(1) {
+            background: #ff5f56;
+        }
+
+        .terminal-dot:nth-child(2) {
+            background: #ffbd2e;
+        }
+
+        .terminal-dot:nth-child(3) {
+            background: #27ca3f;
+        }
+
+        .terminal-title {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .terminal-body {
+            padding: 1.5rem;
+            font-family: var(--font-mono);
+            color: var(--accent-primary);
+            line-height: 1.6;
+        }
+
+        .terminal-line {
+            margin-bottom: 0.5rem;
+        }
+
+        .prompt {
+            color: var(--accent-primary);
+        }
+
+        .command {
+            color: var(--text-primary);
+        }
+
+        .output {
+            color: var(--text-secondary);
+            margin-left: 2rem;
+        }
+
+        .form-container {
+            position: relative;
+        }
+
+        .form-group {
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .form-group label {
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .input-container {
+            position: relative;
+        }
+
+        .input-container input {
+            padding-left: 3rem;
+            font-family: var(--font-mono);
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-primary);
+            transition: all 0.3s ease;
+        }
+
+        .input-container input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 1rem;
+            background: linear-gradient(135deg, var(--accent-primary), #00cc6a);
+            border: none;
+            border-radius: 8px;
+            color: var(--bg-primary);
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 255, 136, 0.3);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .credentials-info {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            text-align: center;
+        }
+
+        .credentials-info h4 {
+            color: var(--accent-secondary);
+            font-family: var(--font-mono);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .cred-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+
+        .cred-label {
+            color: var(--text-secondary);
+        }
+
+        .cred-value {
+            color: var(--accent-primary);
+            background: rgba(0, 255, 136, 0.1);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .signup-link {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-primary);
+        }
+
+        .signup-link a {
+            color: var(--accent-secondary);
+            text-decoration: none;
+            font-family: var(--font-mono);
+            transition: all 0.2s ease;
+        }
+
+        .signup-link a:hover {
+            color: var(--accent-primary);
+            text-shadow: 0 0 10px var(--accent-primary);
+        }
+
+        /* Alert Styles */
+        .alert {
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .alert-error {
+            background: rgba(220, 53, 69, 0.1);
+            border-color: rgba(220, 53, 69, 0.3);
+            color: #dc3545;
+        }
+
+        .alert-success {
+            background: rgba(40, 167, 69, 0.1);
+            border-color: rgba(40, 167, 69, 0.3);
+            color: #28a745;
+        }
+
+        .alert-info {
+            background: rgba(23, 162, 184, 0.1);
+            border-color: rgba(23, 162, 184, 0.3);
+            color: #17a2b8;
+        }
+
+        .alert-warning {
+            background: rgba(255, 193, 7, 0.1);
+            border-color: rgba(255, 193, 7, 0.3);
+            color: #ffc107;
+        }
+
+        /* Alert Styles for Flash Messages */
+        .alert {
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .alert-error {
+            background: rgba(220, 53, 69, 0.1);
+            border-color: rgba(220, 53, 69, 0.3);
+            color: #ff6b6b;
+        }
+
+        .alert-success {
+            background: rgba(40, 167, 69, 0.1);
+            border-color: rgba(40, 167, 69, 0.3);
+            color: var(--accent-primary);
+        }
+
+        .alert-info {
+            background: rgba(23, 162, 184, 0.1);
+            border-color: rgba(23, 162, 184, 0.3);
+            color: #17a2b8;
+        }
+
+        .alert-warning {
+            background: rgba(255, 193, 7, 0.1);
+            border-color: rgba(255, 193, 7, 0.3);
+            color: #ffc107;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Matrix Background Effect -->
+    <canvas class="matrix-bg" id="matrixCanvas"></canvas>
+
+    <div class="login-container">
+        <div class="login-header">
+            <div class="logo">
+                <i class="fas fa-robot"></i> HuboluxTradingBot
+            </div>
+            <p style="color: var(--text-secondary); font-family: var(--font-mono); margin: 0;">
+                >> Initializing secure connection...
+            </p>
+        </div>
+
+        <!-- Terminal Window -->
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <div class="terminal-dots">
+                    <div class="terminal-dot"></div>
+                    <div class="terminal-dot"></div>
+                    <div class="terminal-dot"></div>
+                </div>
+                <div class="terminal-title">hubolux@trading-system</div>
+            </div>
+            <div class="terminal-body">
+                <div class="terminal-line">
+                    <span class="prompt">$</span> <span class="command">sudo access-control --login</span>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Authenticating user credentials...</div>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Security level: <span style="color: var(--accent-primary);">MAXIMUM</span></div>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Please provide authentication:</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ 'error' if category == 'error' else category }}" style="margin-bottom: 2rem;">
+            <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'info-circle' }}"></i>
+            {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <!-- Login Form -->
+        <form method="POST" action="{{ url_for('auth.login') }}" class="form-container">
+            <div class="form-group">
+                <label for="username">
+                    <i class="fas fa-terminal"></i> USERNAME
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-user input-icon"></i>
+                    <input type="text" id="username" name="username" required placeholder="Enter your username"
+                        autocomplete="username">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">
+                    <i class="fas fa-lock"></i> PASSWORD
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-key input-icon"></i>
+                    <input type="password" id="password" name="password" required placeholder="Enter your password"
+                        autocomplete="current-password">
+                </div>
+            </div>
+
+            <button type="submit" class="login-btn">
+                <i class="fas fa-sign-in-alt"></i> ACCESS SYSTEM
+            </button>
+        </form>
+
+        <!-- Default Credentials -->
+        <!-- <div class="credentials-info">
+            <h4><i class="fas fa-info-circle"></i> DEFAULT ACCESS CREDENTIALS</h4>
+            <div class="cred-item">
+                <span class="cred-label">Username:</span>
+                <span class="cred-value">admin</span>
+            </div>
+            <div class="cred-item">
+                <span class="cred-label">Password:</span>
+                <span class="cred-value">admin123</span>
+            </div>
+        </div> -->
+
+        <!-- Signup Link -->
+        <div class="signup-link">
+            <a href="{{ url_for('auth.signup') }}">
+                <i class="fas fa-user-plus"></i> REQUEST NEW ACCESS >>
+            </a>
+        </div>
+    </div>
+
+    <!-- Matrix Rain Effect -->
+    <script>
+        // Matrix Rain Effect
+        const canvas = document.getElementById('matrixCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const matrix = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()*&^%+-/~{[|`]}";
+        const matrixArray = matrix.split("");
+
+        const fontSize = 10;
+        const columns = canvas.width / fontSize;
+
+        const drops = [];
+        for (let x = 0; x < columns; x++) {
+            drops[x] = 1;
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.04)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#00ff88';
+            ctx.font = fontSize + 'px monospace';
+
+            for (let i = 0; i < drops.length; i++) {
+                const text = matrixArray[Math.floor(Math.random() * matrixArray.length)];
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            }
+        }
+
+        setInterval(draw, 35);
+
+        // Resize canvas on window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Terminal typing effect
+        document.addEventListener('DOMContentLoaded', function () {
+            const commands = document.querySelectorAll('.command');
+            commands.forEach((cmd, index) => {
+                const text = cmd.textContent;
+                cmd.textContent = '';
+                setTimeout(() => {
+                    typeWriter(cmd, text, 50);
+                }, index * 1000);
+            });
+        });
+
+        function typeWriter(element, text, speed = 50) {
+            let i = 0;
+            function type() {
+                if (i < text.length) {
+                    element.textContent += text.charAt(i);
+                    i++;
+                    setTimeout(type, speed);
+                }
+            }
+            type();
+        }
+
+        // Form enhancements
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('focus', function () {
+                this.parentElement.style.borderColor = 'var(--accent-primary)';
+                this.parentElement.style.boxShadow = '0 0 20px rgba(0, 255, 136, 0.2)';
+            });
+
+            input.addEventListener('blur', function () {
+                this.parentElement.style.borderColor = 'var(--border-primary)';
+                this.parentElement.style.boxShadow = 'none';
+            });
+        });
+
+        // Add form submission debugging
+        document.querySelector('.form-container').addEventListener('submit', function (e) {
+            console.log('Form submitted');
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            console.log('Username:', username);
+            console.log('Password length:', password.length);
+
+            if (!username || !password) {
+                e.preventDefault();
+                alert('Please enter both username and password');
+                return false;
+            }
+        });
+    </script>
+</body>
+
+</html>

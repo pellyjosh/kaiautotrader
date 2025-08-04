@@ -1,0 +1,519 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - HuboluxTradingBot{% endblock %}
+
+{% block head %}
+<style>
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        padding: 1.5rem;
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+        border-color: var(--border-secondary);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+    }
+
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    }
+
+    .stat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .stat-title {
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .stat-icon {
+        font-size: 1.5rem;
+        color: var(--accent-primary);
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+        font-family: var(--font-mono);
+    }
+
+    .stat-change {
+        font-size: 0.8rem;
+        font-family: var(--font-mono);
+    }
+
+    .stat-change.positive {
+        color: var(--text-success);
+    }
+
+    .stat-change.negative {
+        color: var(--text-error);
+    }
+
+    .chart-container {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .chart-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border-primary);
+    }
+
+    .chart-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .chart-controls {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .chart-btn {
+        padding: 0.25rem 0.75rem;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-primary);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .chart-btn.active {
+        background: var(--accent-primary);
+        color: var(--bg-primary);
+        border-color: var(--accent-primary);
+    }
+
+    .recent-trades {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .recent-trades-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-primary);
+        background: var(--bg-tertiary);
+    }
+
+    .recent-trades-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+    }
+
+    .trade-item {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-primary);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background 0.2s ease;
+    }
+
+    .trade-item:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .trade-item:last-child {
+        border-bottom: none;
+    }
+
+    .trade-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .trade-pair {
+        font-family: var(--font-mono);
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .trade-time {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+    }
+
+    .trade-result {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.25rem;
+    }
+
+    .trade-pnl {
+        font-family: var(--font-mono);
+        font-weight: 600;
+    }
+
+    .trade-pnl.profit {
+        color: var(--text-success);
+    }
+
+    .trade-pnl.loss {
+        color: var(--text-error);
+    }
+
+    .bot-status-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .bot-status-header {
+        display: flex;
+        justify-content: between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .bot-controls {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .system-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+
+    .metric {
+        background: var(--bg-tertiary);
+        padding: 1rem;
+        border-radius: 6px;
+        border: 1px solid var(--border-primary);
+    }
+
+    .metric-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        font-family: var(--font-mono);
+    }
+
+    .metric-value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-between align-center mb-3">
+    <div>
+        <h1 class="neon">Trading Dashboard</h1>
+        <p class="text-secondary">Real-time monitoring and control center</p>
+    </div>
+    <div class="terminal" style="padding: 0.5rem 1rem;">
+        <span class="terminal-prompt">system@hubolux:~$</span>
+        <span class="terminal-command">uptime</span>
+        <div class="terminal-output" style="margin-left: 0; margin-top: 0.25rem;">
+            up 2 days, 14:32, load avg: 0.45
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Active Accounts</span>
+            <i class="fas fa-wallet stat-icon"></i>
+        </div>
+        <div class="stat-value">{{ stats.total_accounts or 0 }}</div>
+        <div class="stat-change positive">
+            <i class="fas fa-arrow-up"></i> +2 this week
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Total Balance</span>
+            <i class="fas fa-dollar-sign stat-icon"></i>
+        </div>
+        <div class="stat-value">${{ "{:,.2f}".format(stats.total_balance or 0) }}</div>
+        <div class="stat-change positive">
+            <i class="fas fa-arrow-up"></i> +5.2% this month
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Win Rate</span>
+            <i class="fas fa-chart-line stat-icon"></i>
+        </div>
+        <div class="stat-value">{{ "{:.1f}".format(stats.win_rate or 0) }}%</div>
+        <div class="stat-change positive">
+            <i class="fas fa-arrow-up"></i> +1.5% this week
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Active Trades</span>
+            <i class="fas fa-exchange-alt stat-icon"></i>
+        </div>
+        <div class="stat-value">{{ stats.active_trades or 0 }}</div>
+        <div class="stat-change">
+            <i class="fas fa-clock"></i> Real-time
+        </div>
+    </div>
+</div>
+
+<!-- Bot Status Panel -->
+<div class="bot-status-panel">
+    <div class="bot-status-header">
+        <h3><i class="fas fa-robot"></i> Bot Status & Control</h3>
+        <div class="d-flex align-center gap-2">
+            <span class="status {{ 'status-active' if bot_status.get('is_running') else 'status-inactive' }}">
+                <i class="fas fa-circle"></i>
+                {{ 'RUNNING' if bot_status.get('is_running') else 'STOPPED' }}
+            </span>
+        </div>
+    </div>
+
+    <div class="system-metrics">
+        <div class="metric">
+            <div class="metric-label">CPU Usage</div>
+            <div class="metric-value">{{ "{:.1f}".format(system_info.get('cpu_percent', 0)) }}%</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Memory Usage</div>
+            <div class="metric-value">{{ "{:.1f}".format(system_info.get('memory', {}).get('percent', 0)) }}%</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Uptime</div>
+            <div class="metric-value">{{ bot_status.get('uptime', 'N/A') }}</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Last Signal</div>
+            <div class="metric-value">{{ bot_status.get('last_signal', 'N/A') }}</div>
+        </div>
+    </div>
+
+    <div class="bot-controls">
+        <button class="btn" onclick="refreshStatus()">
+            <i class="fas fa-sync"></i> Refresh Status
+        </button>
+        <a href="{{ url_for('accounts.list_accounts') }}" class="btn btn-primary">
+            <i class="fas fa-wallet"></i> Manage Accounts
+        </a>
+    </div>
+</div>
+
+<!-- Performance Chart -->
+<div class="chart-container">
+    <div class="chart-header">
+        <h3 class="chart-title"><i class="fas fa-chart-area"></i> Performance Overview</h3>
+        <div class="chart-controls">
+            <button class="chart-btn active" data-period="1d">1D</button>
+            <button class="chart-btn" data-period="1w">1W</button>
+            <button class="chart-btn" data-period="1m">1M</button>
+            <button class="chart-btn" data-period="3m">3M</button>
+        </div>
+    </div>
+    <div id="performanceChart"
+        style="height: 300px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+        <div class="terminal" style="text-align: center;">
+            <div class="terminal-line">
+                <span class="prompt">$</span> <span class="command">python chart_generator.py --type=performance</span>
+            </div>
+            <div class="output">Loading market data...</div>
+            <div class="output">Generating visualization...</div>
+            <div class="output" style="color: var(--accent-primary);">Chart will be rendered here</div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Trades -->
+<div class="recent-trades">
+    <div class="recent-trades-header">
+        <h3 class="recent-trades-title"><i class="fas fa-history"></i> Recent Trades</h3>
+    </div>
+
+    {% if recent_trades %}
+    {% for trade in recent_trades %}
+    <div class="trade-item">
+        <div class="trade-info">
+            <div class="trade-pair">{{ trade.pair or 'EUR/USD' }}</div>
+            <div class="trade-time">{{ trade.timestamp or '2024-01-15 14:30:25' }}</div>
+        </div>
+        <div class="trade-result">
+            <div class="trade-pnl {{ 'profit' if (trade.pnl or 0) > 0 else 'loss' }}">
+                {{ '+' if (trade.pnl or 0) > 0 else '' }}${{ "{:.2f}".format(trade.pnl or 0) }}
+            </div>
+            <div class="status {{ 'status-active' if trade.result == 'win' else 'status-inactive' }}">
+                {{ trade.result or 'win' }}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <!-- Demo data -->
+    <div class="trade-item">
+        <div class="trade-info">
+            <div class="trade-pair">EUR/USD</div>
+            <div class="trade-time">2024-01-15 14:30:25</div>
+        </div>
+        <div class="trade-result">
+            <div class="trade-pnl profit">+$25.50</div>
+            <div class="status status-active">WIN</div>
+        </div>
+    </div>
+    <div class="trade-item">
+        <div class="trade-info">
+            <div class="trade-pair">GBP/USD</div>
+            <div class="trade-time">2024-01-15 14:25:12</div>
+        </div>
+        <div class="trade-result">
+            <div class="trade-pnl loss">-$15.00</div>
+            <div class="status status-inactive">LOSS</div>
+        </div>
+    </div>
+    <div class="trade-item">
+        <div class="trade-info">
+            <div class="trade-pair">USD/JPY</div>
+            <div class="trade-time">2024-01-15 14:20:08</div>
+        </div>
+        <div class="trade-result">
+            <div class="trade-pnl profit">+$32.75</div>
+            <div class="status status-active">WIN</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function refreshStatus() {
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+        btn.disabled = true;
+
+        setTimeout(() => {
+            location.reload();
+        }, 500);
+    }
+
+    // Chart controls
+    document.querySelectorAll('.chart-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+
+            const period = this.dataset.period;
+            updateChart(period);
+        });
+    });
+
+    function updateChart(period) {
+        const chartContainer = document.getElementById('performanceChart');
+        chartContainer.innerHTML = `
+            <div class="terminal" style="text-align: center;">
+                <div class="terminal-line">
+                    <span class="prompt">$</span> <span class="command">python chart_generator.py --period=${period}</span>
+                </div>
+                <div class="output">Loading ${period} data...</div>
+                <div class="output">Rendering chart...</div>
+                <div class="output" style="color: var(--accent-primary);">Chart updated for ${period} period</div>
+            </div>
+        `;
+    }
+
+    // Flash message function (for JavaScript alerts)
+    function flash(message, category = 'info') {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${category}`;
+        alertDiv.innerHTML = `
+            <i class="fas fa-${category === 'success' ? 'check-circle' : category === 'error' ? 'times-circle' : 'info-circle'}"></i>
+            ${message}
+        `;
+
+        const content = document.querySelector('.main-content');
+        content.insertBefore(alertDiv, content.firstChild);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            alertDiv.remove();
+        }, 5000);
+    }
+
+    // Terminal effect for command outputs
+    document.addEventListener('DOMContentLoaded', function () {
+        const outputs = document.querySelectorAll('.terminal-output');
+        outputs.forEach(output => {
+            if (!output.dataset.animated) {
+                const text = output.textContent;
+                output.textContent = '';
+                typeWriter(output, text, 30);
+                output.dataset.animated = 'true';
+            }
+        });
+    });
+
+    function typeWriter(element, text, speed = 50) {
+        let i = 0;
+        function type() {
+            if (i < text.length) {
+                element.textContent += text.charAt(i);
+                i++;
+                setTimeout(type, speed);
+            }
+        }
+        type();
+    }
+</script>
+{% endblock %}

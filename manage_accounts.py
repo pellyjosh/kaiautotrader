@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Account Management Utility for KaiSignalTrade Bot
+Account Management Utility for HuboluxTradingBot Bot
 Allows you to manage PocketOption accounts in the database
 """
 

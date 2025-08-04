@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Request Access - HuboluxTradingBot</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Dark Tech Theme -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dark-tech.css') }}">
+
+    <style>
+        body {
+            background: radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(0, 136, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(255, 0, 136, 0.05) 0%, transparent 50%),
+                var(--bg-primary);
+            /* min-height: 100vh; */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* overflow: hidden; */
+            position: relative;
+        }
+
+        .matrix-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.1;
+        }
+
+        .signup-container {
+            background: rgba(17, 17, 17, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 700px;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            z-index: 10;
+            animation: slideIn 0.8s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .signup-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .logo {
+            font-family: var(--font-mono);
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        .terminal-window {
+            background: #000000;
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            background: var(--bg-secondary);
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot:nth-child(1) {
+            background: #ff5f56;
+        }
+
+        .terminal-dot:nth-child(2) {
+            background: #ffbd2e;
+        }
+
+        .terminal-dot:nth-child(3) {
+            background: #27ca3f;
+        }
+
+        .terminal-title {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .terminal-body {
+            padding: 1.5rem;
+            font-family: var(--font-mono);
+            color: var(--accent-primary);
+            line-height: 1.6;
+        }
+
+        .terminal-line {
+            margin-bottom: 0.5rem;
+        }
+
+        .prompt {
+            color: var(--accent-primary);
+        }
+
+        .command {
+            color: var(--text-primary);
+        }
+
+        .output {
+            color: var(--text-secondary);
+            margin-left: 2rem;
+        }
+
+        .form-container {
+            position: relative;
+        }
+
+        .form-group {
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .form-group label {
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .input-container {
+            position: relative;
+        }
+
+        .input-container input {
+            padding-left: 3rem;
+            font-family: var(--font-mono);
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-primary);
+            transition: all 0.3s ease;
+        }
+
+        .input-container input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .signup-btn {
+            width: 100%;
+            padding: 1rem;
+            background: linear-gradient(135deg, var(--accent-secondary), #0066cc);
+            border: none;
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .signup-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 136, 255, 0.3);
+        }
+
+        .signup-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-link {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-primary);
+        }
+
+        .login-link a {
+            color: var(--accent-primary);
+            text-decoration: none;
+            font-family: var(--font-mono);
+            transition: all 0.2s ease;
+        }
+
+        .login-link a:hover {
+            color: var(--accent-secondary);
+            text-shadow: 0 0 10px var(--accent-secondary);
+        }
+
+        .password-requirements {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .password-requirements h4 {
+            color: var(--accent-secondary);
+            font-family: var(--font-mono);
+            margin-bottom: 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        .requirement {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .requirement.valid {
+            color: var(--text-success);
+        }
+
+        .requirement.invalid {
+            color: var(--text-error);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Matrix Background Effect -->
+    <canvas class="matrix-bg" id="matrixCanvas"></canvas>
+
+    <div class="signup-container">
+        <div class="signup-header">
+            <div class="logo">
+                <i class="fas fa-robot"></i> HuboluxTradingBot
+            </div>
+            <p style="color: var(--text-secondary); font-family: var(--font-mono); margin: 0;">
+                >> Request new system access...
+            </p>
+        </div>
+
+        <!-- Terminal Window -->
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <div class="terminal-dots">
+                    <div class="terminal-dot"></div>
+                    <div class="terminal-dot"></div>
+                    <div class="terminal-dot"></div>
+                </div>
+                <div class="terminal-title">hubolux@user-registration</div>
+            </div>
+            <div class="terminal-body">
+                <div class="terminal-line">
+                    <span class="prompt">$</span> <span class="command">sudo useradd --create-account</span>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Initializing user registration process...</div>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Security level: <span style="color: var(--accent-secondary);">HIGH</span></div>
+                </div>
+                <div class="terminal-line">
+                    <div class="output">Please provide user details:</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ 'error' if category == 'error' else category }}" style="margin-bottom: 2rem;">
+            <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'info-circle' }}"></i>
+            {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <!-- Signup Form -->
+        <form method="POST" class="form-container" id="signupForm">
+            <div class="form-group">
+                <label for="username">
+                    <i class="fas fa-terminal"></i> USERNAME
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-user input-icon"></i>
+                    <input type="text" id="username" name="username" required placeholder="Choose a username"
+                        minlength="3" maxlength="20">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="email">
+                    <i class="fas fa-envelope"></i> EMAIL
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-at input-icon"></i>
+                    <input type="email" id="email" name="email" required placeholder="Enter your email address">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">
+                    <i class="fas fa-lock"></i> PASSWORD
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-key input-icon"></i>
+                    <input type="password" id="password" name="password" required placeholder="Create a secure password"
+                        minlength="8">
+                </div>
+
+                <div class="password-requirements">
+                    <h4><i class="fas fa-shield-alt"></i> PASSWORD REQUIREMENTS</h4>
+                    <div class="requirement" id="req-length">
+                        <i class="fas fa-times"></i> At least 8 characters
+                    </div>
+                    <div class="requirement" id="req-uppercase">
+                        <i class="fas fa-times"></i> One uppercase letter
+                    </div>
+                    <div class="requirement" id="req-lowercase">
+                        <i class="fas fa-times"></i> One lowercase letter
+                    </div>
+                    <div class="requirement" id="req-number">
+                        <i class="fas fa-times"></i> One number
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirm_password">
+                    <i class="fas fa-lock"></i> CONFIRM PASSWORD
+                </label>
+                <div class="input-container">
+                    <i class="fas fa-check-double input-icon"></i>
+                    <input type="password" id="confirm_password" name="confirm_password" required
+                        placeholder="Confirm your password">
+                </div>
+            </div>
+
+            <button type="submit" class="signup-btn" id="submitBtn" disabled>
+                <i class="fas fa-user-plus"></i> REQUEST ACCESS
+            </button>
+        </form>
+
+        <!-- Login Link -->
+        <div class="login-link">
+            <a href="{{ url_for('auth.login') }}">
+                <i class="fas fa-sign-in-alt"></i>
+                << BACK TO LOGIN TERMINAL </a>
+        </div>
+    </div>
+
+    <!-- Matrix Rain Effect -->
+    <script>
+        // Matrix Rain Effect
+        const canvas = document.getElementById('matrixCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const matrix = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()*&^%+-/~{[|`]}";
+        const matrixArray = matrix.split("");
+
+        const fontSize = 10;
+        const columns = canvas.width / fontSize;
+
+        const drops = [];
+        for (let x = 0; x < columns; x++) {
+            drops[x] = 1;
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.04)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#00ff88';
+            ctx.font = fontSize + 'px monospace';
+
+            for (let i = 0; i < drops.length; i++) {
+                const text = matrixArray[Math.floor(Math.random() * matrixArray.length)];
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            }
+        }
+
+        setInterval(draw, 35);
+
+        // Resize canvas on window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Password validation
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirm_password');
+        const submitBtn = document.getElementById('submitBtn');
+
+        const requirements = {
+            length: document.getElementById('req-length'),
+            uppercase: document.getElementById('req-uppercase'),
+            lowercase: document.getElementById('req-lowercase'),
+            number: document.getElementById('req-number')
+        };
+
+        function validatePassword() {
+            const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+
+            // Check requirements
+            const checks = {
+                length: password.length >= 8,
+                uppercase: /[A-Z]/.test(password),
+                lowercase: /[a-z]/.test(password),
+                number: /\d/.test(password)
+            };
+
+            // Update requirement indicators
+            Object.keys(checks).forEach(key => {
+                const req = requirements[key];
+                const icon = req.querySelector('i');
+
+                if (checks[key]) {
+                    req.classList.add('valid');
+                    req.classList.remove('invalid');
+                    icon.className = 'fas fa-check';
+                } else {
+                    req.classList.add('invalid');
+                    req.classList.remove('valid');
+                    icon.className = 'fas fa-times';
+                }
+            });
+
+            // Check if passwords match
+            const passwordsMatch = password === confirmPassword && confirmPassword.length > 0;
+
+            // Enable submit button if all requirements are met
+            const allValid = Object.values(checks).every(check => check) && passwordsMatch;
+            submitBtn.disabled = !allValid;
+
+            if (allValid) {
+                submitBtn.style.opacity = '1';
+                submitBtn.style.cursor = 'pointer';
+            } else {
+                submitBtn.style.opacity = '0.6';
+                submitBtn.style.cursor = 'not-allowed';
+            }
+        }
+
+        passwordInput.addEventListener('input', validatePassword);
+        confirmPasswordInput.addEventListener('input', validatePassword);
+
+        // Terminal typing effect
+        document.addEventListener('DOMContentLoaded', function () {
+            const commands = document.querySelectorAll('.command');
+            commands.forEach((cmd, index) => {
+                const text = cmd.textContent;
+                cmd.textContent = '';
+                setTimeout(() => {
+                    typeWriter(cmd, text, 50);
+                }, index * 1000);
+            });
+        });
+
+        function typeWriter(element, text, speed = 50) {
+            let i = 0;
+            function type() {
+                if (i < text.length) {
+                    element.textContent += text.charAt(i);
+                    i++;
+                    setTimeout(type, speed);
+                }
+            }
+            type();
+        }
+
+        // Form enhancements
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('focus', function () {
+                this.parentElement.style.borderColor = 'var(--accent-primary)';
+                this.parentElement.style.boxShadow = '0 0 20px rgba(0, 255, 136, 0.2)';
+            });
+
+            input.addEventListener('blur', function () {
+                this.parentElement.style.borderColor = 'var(--border-primary)';
+                this.parentElement.style.boxShadow = 'none';
+            });
+        });
+    </script>
+</body>
+
+</html>

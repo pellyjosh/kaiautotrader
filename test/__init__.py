@@ -1,1 +1,1 @@
-# Test package for KaiSignalTrade
+# Test package for HuboluxTradingBot

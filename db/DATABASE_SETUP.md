@@ -1,4 +1,4 @@
-# KaiSignalTrade Database Setup Guide
+# HuboluxTradingBot Database Setup Guide
 
 ## 🗄️ Database Integration Overview
 

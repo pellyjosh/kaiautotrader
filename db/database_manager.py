@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database Manager for KaiSignalTrade Bot
+Database Manager for HuboluxTradingBot Bot
 Supports both SQLite (local) and MySQL (remote) databases
 Tracks trades, Martingale state, and account performance
 """
@@ -777,6 +777,14 @@ class DatabaseManager:
             self.logger.error(f"Failed to update enabled status for {worker_name}: {e}")
             return False
     
+    def enable_account(self, worker_name: str) -> bool:
+        """Enable an account (convenience method)"""
+        return self.update_account_enabled_status(worker_name, True)
+    
+    def disable_account(self, worker_name: str) -> bool:
+        """Disable an account (convenience method)"""
+        return self.update_account_enabled_status(worker_name, False)
+    
     def update_account_martingale_settings(self, worker_name: str, base_amount: float = None, 
                                          martingale_multiplier: float = None, 
                                          martingale_enabled: bool = None) -> bool:
@@ -1314,6 +1322,10 @@ class DatabaseManager:
     def get_performance_summary(self, worker_name: str = None, days: int = 7) -> List[Dict]:
         """Get performance summary for last N days"""
         try:
+            # Ensure days is an integer
+            if not isinstance(days, int):
+                days = int(days) if days else 7
+            
             start_date = datetime.now().date() - timedelta(days=days)
             
             if worker_name:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Migration Script for KaiSignalTrade Bot
+Migration Script for HuboluxTradingBot Bot
 Migrates hardcoded account configurations to database
 """
 
@@ -73,7 +73,7 @@ def migrate_accounts():
     return True
 
 def main():
-    print("=== KaiSignalTrade Account Migration ===")
+    print("=== HuboluxTradingBot Account Migration ===")
     print("This script will migrate your hardcoded account configurations to the database.")
     print("Note: If accounts already exist, they will be updated with new values.")
     print()

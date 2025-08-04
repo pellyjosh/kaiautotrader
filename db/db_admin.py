@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database Administration Tool for KaiSignalTrade Bot
+Database Administration Tool for HuboluxTradingBot Bot
 Provides database management, statistics, and maintenance functions
 """
 
@@ -196,7 +196,7 @@ def add_test_data(db):
     print("✅ Test trades added")
 
 def main():
-    parser = argparse.ArgumentParser(description="KaiSignalTrade Database Administration")
+    parser = argparse.ArgumentParser(description="HuboluxTradingBot Database Administration")
     parser.add_argument("command", choices=[
         "stats", "accounts", "trades", "performance", "reset-martingale",
         "backup", "cleanup", "test-data"

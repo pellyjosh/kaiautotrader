@@ -1,6 +1,6 @@
 # Test Scripts
 
-This folder contains various test scripts for the KaiSignalTrade project.
+This folder contains various test scripts for the HuboluxTradingBot project.
 
 ## Available Tests
 
@@ -111,7 +111,7 @@ python test/demo_enhanced_martingale.py
 Make sure you're in the project root directory and use the virtual environment:
 
 ```bash
-cd "/Users/Hubolux/Documents/Project 001/HuboluxJobs/Trading/kaiSignalTrade"
+cd "/Users/Hubolux/Documents/Project 001/HuboluxJobs/Trading/HuboluxTradingBot"
 source venv/bin/activate  # or use the full path to python
 python test/test_name.py
 ```

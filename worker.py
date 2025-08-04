@@ -1,4 +1,4 @@
-# /Users/Hubolux/Documents/Project 001/HuboluxJobs/Trading/kaiSignalTrade/pocket_worker.py
+# /Users/Hubolux/Documents/Project 001/HuboluxJobs/Trading/HuboluxTradingBot/pocket_worker.py
 import time
 import json # Import the json module
 import multiprocessing

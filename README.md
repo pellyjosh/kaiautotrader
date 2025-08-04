@@ -46,7 +46,7 @@
 
 ```bash
 git clone <repository-url>
-cd kaiSignalTrade
+cd HuboluxTradingBot
 ```
 
 ### 2. Create Virtual Environment
@@ -201,7 +201,7 @@ python test/test_signal_parsing.py
 ## ⚙️ File Structure
 
 ```
-kaiSignalTrade/
+HuboluxTradingBot/
 ├── bot.py                    # Main bot orchestration
 ├── detectsignal.py          # Signal detection & Martingale logic
 ├── worker.py                # PocketOption trading worker
@@ -316,16 +316,19 @@ This project is an unofficial implementation and has no connection with PocketOp
   Powered ❤️ by <a href="https://github.com/Mastaaa1987">Mastaaa1987</a>
 </p>
 
-
 # Add your pelly_demo account
+
 python manage_accounts.py add "pelly_demo" '42["auth",{"session":"bpajv9apd668u8qkcdp4i34vc0","isDemo":1,"uid":104296609,"platform":1,"isFastHistory":true,"isOptimized":true}]' --demo true --enabled true
 
 # Add other accounts as needed
+
 python manage_accounts.py add "account_name" "ssid_string" --demo true/false --enabled true/false
 
 # View all accounts
+
 python manage_accounts.py list
 
 # Enable/disable accounts dynamically
+
 python manage_accounts.py enable account_name
 python manage_accounts.py disable account_name

@@ -239,7 +239,7 @@ send_alert() {
     log_message "ALERT: $message"
     
     # Send email alert (requires mail command to be configured)
-    # echo "$message" | mail -s "KaiSignalTrade Alert" "$ALERT_EMAIL"
+    # echo "$message" | mail -s "HuboluxTradingBot Alert" "$ALERT_EMAIL"
     
     # Or use webhook notification
     # curl -X POST -H 'Content-type: application/json' \

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}System Information{% endblock %}
+
+{% block page_title %}System Information{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- System Overview -->
+        <div class="col-md-6 mb-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-secondary">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-server me-2"></i>System Overview
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if system_info %}
+                    <div class="row">
+                        <div class="col-sm-6">
+                            <p><strong>CPU Usage:</strong> {{ system_info.cpu_percent }}%</p>
+                            <p><strong>Memory Usage:</strong> {{ system_info.memory_percent }}%</p>
+                        </div>
+                        <div class="col-sm-6">
+                            <p><strong>Disk Usage:</strong> {{ system_info.disk_percent }}%</p>
+                            <p><strong>Uptime:</strong> {{ system_info.uptime }}</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">System information not available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot Status -->
+        <div class="col-md-6 mb-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-secondary">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-robot me-2"></i>Bot Status
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if bot_status %}
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-{{ 'success' if bot_status.running else 'danger' }} me-2">
+                            {{ 'Running' if bot_status.running else 'Stopped' }}
+                        </span>
+                        <span class="text-light">{{ bot_status.status }}</span>
+                    </div>
+                    {% if bot_status.running %}
+                    <p><strong>Active Accounts:</strong> {{ bot_status.active_accounts }}</p>
+                    <p><strong>Last Activity:</strong> {{ bot_status.last_activity }}</p>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-muted">Bot status not available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Additional System Details -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-secondary">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-line me-2"></i>Performance Metrics
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h6 class="text-secondary">Active Trades</h6>
+                                <h4 class="text-success">{{ system_info.active_trades if system_info else '0' }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h6 class="text-secondary">Total Signals</h6>
+                                <h4 class="text-info">{{ system_info.total_signals if system_info else '0' }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h6 class="text-secondary">Success Rate</h6>
+                                <h4 class="text-warning">{{ system_info.success_rate if system_info else '0%' }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h6 class="text-secondary">Active Accounts</h6>
+                                <h4 class="text-primary">{{ system_info.account_count if system_info else '0' }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
